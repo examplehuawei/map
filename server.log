@@ -1,0 +1,18 @@
+[whisper] 正在加载模型（首次约 1-2 分钟）...
+Exception in thread Thread-1 (get_model):
+[server] 启动 http://0.0.0.0:8080
+[server] 静态文件目录: /workspace
+Traceback (most recent call last):
+  File "/root/.pyenv/versions/3.14.4/lib/python3.14/threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/root/.pyenv/versions/3.14.4/lib/python3.14/threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/server.py", line 39, in get_model
+    from faster_whisper import WhisperModel
+ModuleNotFoundError: No module named 'faster_whisper'
+[127.0.0.1] "GET / HTTP/1.1" 200 -
+[wikimedia] geosearch failed: status=502
+[127.0.0.1] "GET /api/wikimedia?lat=39.9042&lon=116.4074&radius=10000 HTTP/1.1" 200 -
+[127.0.0.1] "GET / HTTP/1.1" 200 -

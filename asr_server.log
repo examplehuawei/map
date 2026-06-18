@@ -1,0 +1,14 @@
+[whisper] 正在加载模型（首次约 1-2 分钟，之后秒级）...
+[asr-server] 启动 http://0.0.0.0:8081
+[127.0.0.1] "GET /health HTTP/1.1" 200 -
+[whisper] 模型加载完成
+[127.0.0.1] "GET /health HTTP/1.1" 200 -
+[asr] 收到 64044 字节音频，保存到 /tmp/tmpac00iwlu.wav
+[asr] 识别完成: ''  耗时 0.08s
+[127.0.0.1] "POST /asr HTTP/1.1" 200 -
+[127.0.0.1] "GET /health HTTP/1.1" 200 -
+[asr] 收到 64044 字节音频，保存到 /tmp/tmpmwyn1req.wav
+[asr] 识别完成: ''  耗时 0.03s
+[127.0.0.1] "POST /asr HTTP/1.1" 200 -
+/root/.pyenv/versions/3.14.4/lib/python3.14/multiprocessing/resource_tracker.py:396: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-vcy5h5d0'}
+  warnings.warn(

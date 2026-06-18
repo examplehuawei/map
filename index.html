@@ -1,0 +1,4447 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>地图</title>
+    <link rel="stylesheet" href="leaflet.css" />
+    <script>
+        // ===== 自动语言检测 =====
+        (function() {
+            try {
+                var raw = (navigator.languages && navigator.languages.length)
+                    ? navigator.languages[0]
+                    : (navigator.language || navigator.userLanguage || 'zh-CN');
+                raw = String(raw || 'zh-CN').trim();
+                // 主语言代码：zh / en / ja / ko / fr / de / es / ru / pt / ar / hi ...
+                var short = raw.toLowerCase().split(/[-_]/)[0] || 'zh';
+                // 地区代码：CN / US / GB / JP / TW / HK ...
+                var region = '';
+                var m = raw.match(/[-_]([A-Za-z]{2,3})/);
+                if (m) region = m[1].toUpperCase();
+                // 拼成 BCP-47
+                var full = short + (region ? '-' + region : '');
+                // 中文默认带 CN，其它语言不强制地区
+                if (short === 'zh' && !region) full = 'zh-CN';
+                window.APP_LANG = full;            // 例：zh-CN / en-US / ja-JP
+                window.APP_LANG_SHORT = short;     // 例：zh / en / ja
+                document.documentElement.lang = full;
+            } catch (e) {
+                window.APP_LANG = 'zh-CN';
+                window.APP_LANG_SHORT = 'zh';
+            }
+        })();
+    </script>
+    <style>
+        /* ========= 基础 ========= */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; }
+        body {
+            font-family: 'Google Sans', 'Roboto', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: #fff;
+            color: #202124;
+            -webkit-font-smoothing: antialiased;
+        }
+        #map { width: 100vw; height: 100vh; z-index: 1; }
+
+        /* ========= Material Design 按钮通用 ========= */
+        .mbtn {
+            width: 40px; height: 40px;
+            border: none;
+            background: #fff;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 1px 2px rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15);
+            color: #5f6368;
+            transition: background .15s, box-shadow .15s;
+            flex-shrink: 0;
+        }
+        .mbtn:hover { background: #f8f9fa; box-shadow: 0 1px 3px rgba(60,64,67,.3), 0 2px 6px 2px rgba(60,64,67,.15); }
+        .mbtn:active { background: #e8eaed; }
+        .mbtn svg { width: 22px; height: 22px; fill: currentColor; }
+        .mbtn.primary { background: #e8f0fe; color: #1a73e8; }
+        .mbtn.primary:hover { background: #d2e3fc; }
+        .mbtn.red { background: #fce8e6; color: #d93025; }
+
+        /* ========= 搜索栏 ========= */
+        .search-panel {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            z-index: 1000;
+            width: 360px;
+            max-width: calc(100vw - 24px);
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 2px rgba(60,64,67,.3), 0 1px 6px 2px rgba(60,64,67,.15);
+            overflow: hidden;
+        }
+        .search-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 8px 8px 12px;
+            height: 56px;
+        }
+        .search-bar .icon-btn {
+            width: 40px; height: 40px;
+            border: none;
+            background: transparent;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #5f6368;
+            flex-shrink: 0;
+        }
+        .search-bar .icon-btn:hover { background: #f1f3f4; }
+        .search-bar .icon-btn svg { width: 22px; height: 22px; fill: currentColor; }
+        .search-input {
+            flex: 1;
+            border: none;
+            outline: none;
+            background: transparent;
+            font-size: 15px;
+            color: #202124;
+            font-family: inherit;
+            height: 100%;
+        }
+        .search-input::placeholder { color: #80868b; }
+        .search-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .mic-btn {
+            width: 40px; height: 40px;
+            border: none;
+            background: #e8f0fe;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #1a73e8;
+            flex-shrink: 0;
+        }
+        .mic-btn:hover { background: #d2e3fc; }
+        .mic-btn.active {
+            background: #ea4335;
+            color: #fff;
+            animation: mic-pulse 1s ease-out infinite;
+        }
+        @keyframes mic-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(234,67,53,.5); }
+            50% { box-shadow: 0 0 0 12px rgba(234,67,53,0); }
+        }
+        .mic-btn svg { width: 22px; height: 22px; fill: currentColor; }
+        .clear-btn {
+            width: 32px; height: 32px;
+            border: none;
+            background: transparent;
+            border-radius: 50%;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            color: #5f6368;
+            flex-shrink: 0;
+        }
+        .clear-btn.show { display: flex; }
+        .clear-btn:hover { background: #f1f3f4; }
+        .clear-btn svg { width: 18px; height: 18px; fill: currentColor; }
+
+        /* 搜索建议分隔 */
+        .search-divider {
+            height: 1px;
+            background: #e8eaed;
+            margin: 0 12px;
+        }
+
+        /* ========= 搜索结果 ========= */
+        .search-results {
+            max-height: calc(100vh - 180px);
+            overflow-y: auto;
+            padding: 8px 0;
+        }
+        .search-results::-webkit-scrollbar { width: 6px; }
+        .search-results::-webkit-scrollbar-thumb { background: #dadce0; border-radius: 3px; }
+        .search-result {
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            cursor: pointer;
+            min-height: 56px;
+        }
+        .search-result:hover { background: #f8f9fa; }
+        .result-icon {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: #e8eaed;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            color: #5f6368;
+        }
+        .result-icon.place { background: #e8f0fe; color: #1a73e8; }
+        .result-icon svg { width: 18px; height: 18px; fill: currentColor; }
+        .result-text { flex: 1; min-width: 0; }
+        .result-title {
+            font-size: 14px;
+            color: #202124;
+            line-height: 1.3;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            -webkit-box-orient: vertical;
+        }
+        .result-sub {
+            font-size: 12px;
+            color: #5f6368;
+            margin-top: 3px;
+            line-height: 1.3;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            -webkit-box-orient: vertical;
+        }
+        .search-loading {
+            padding: 24px 16px;
+            text-align: center;
+            color: #5f6368;
+            font-size: 13px;
+        }
+        .search-loading .spin {
+            display: inline-block;
+            width: 16px; height: 16px;
+            border: 2px solid #e8eaed;
+            border-top-color: #1a73e8;
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ========= 右侧悬浮按钮 ========= */
+        .floating-col {
+            position: absolute;
+            right: 16px;
+            bottom: 120px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            align-items: flex-end;
+        }
+        .fab-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 1px 2px rgba(60,64,67,.3), 0 1px 6px 2px rgba(60,64,67,.15);
+            overflow: hidden;
+        }
+        .fab-btn {
+            width: 48px; height: 48px;
+            border: none;
+            background: #fff;
+            cursor: pointer;
+            color: #5f6368;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .fab-btn:hover { background: #f8f9fa; }
+        .fab-btn.primary { color: #1a73e8; }
+        .fab-btn svg { width: 22px; height: 22px; fill: currentColor; }
+        .fab-btn + .fab-btn { border-top: 1px solid #e8eaed; }
+        .zoom-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 2px rgba(60,64,67,.3), 0 1px 6px 2px rgba(60,64,67,.15);
+            overflow: hidden;
+        }
+        .zoom-btn {
+            width: 48px; height: 48px;
+            border: none;
+            background: #fff;
+            cursor: pointer;
+            color: #5f6368;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .zoom-btn:hover { background: #f8f9fa; }
+        .zoom-btn svg { width: 20px; height: 20px; fill: currentColor; }
+        .zoom-btn + .zoom-btn { border-top: 1px solid #e8eaed; }
+
+        .fab-row {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        /* ========= 可拖动定位按钮 ========= */
+        .locate-wrap {
+            position: absolute;
+            right: 16px;
+            bottom: 40px;
+            z-index: 1000;
+            touch-action: none;
+            user-select: none;
+        }
+        .locate-btn {
+            width: 48px; height: 48px;
+            border: none;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 1px 4px rgba(60,64,67,.3), 0 1px 8px 2px rgba(60,64,67,.15);
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #1a73e8;
+            transition: box-shadow .15s;
+        }
+        .locate-btn:hover { background: #f8f9fa; }
+        .locate-btn:active { cursor: grabbing; }
+        .locate-btn.dragging {
+            box-shadow: 0 4px 14px rgba(26,115,232,.35), 0 0 0 4px rgba(26,115,232,.1);
+            transform: scale(1.05);
+        }
+        .locate-btn svg { width: 24px; height: 24px; fill: currentColor; }
+
+        /* ========= 底部信息卡片 ========= */
+        .bottom-sheet {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 999;
+            background: #fff;
+            border-radius: 16px 16px 0 0;
+            box-shadow: 0 -2px 10px rgba(0,0,0,.12);
+            transform: translateY(100%);
+            transition: transform .3s cubic-bezier(.4,0,.2,1);
+            max-width: 480px;
+            margin: 0 auto;
+            max-height: 45vh;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            touch-action: none;
+            will-change: transform;
+        }
+        .bottom-sheet.dragging { transition: none; }
+        .bottom-sheet.show { transform: translateY(0); }
+        .bottom-sheet.half { max-height: 70vh; }
+        .bottom-sheet.fullscreen {
+            max-height: 100vh;
+            border-radius: 0;
+        }
+        .sheet-handle {
+            width: 48px;
+            height: 4px;
+            background: #dadce0;
+            border-radius: 2px;
+            margin: 10px auto 4px;
+            cursor: grab;
+            touch-action: none;
+        }
+        .sheet-handle:active { cursor: grabbing; }
+        .sheet-photos {
+            padding: 8px 0 0;
+            min-height: 120px;
+        }
+        .sheet-photos-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: #5f6368;
+            padding: 0 20px 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .sheet-photos-grid {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding: 0 20px 16px;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+        }
+        .sheet-photos-grid::-webkit-scrollbar { height: 4px; }
+        .sheet-photos-grid::-webkit-scrollbar-thumb { background: #dadce0; border-radius: 2px; }
+        .sheet-photo-card {
+            flex: 0 0 140px;
+            height: 100px;
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+            scroll-snap-align: start;
+            cursor: pointer;
+            background: #f1f3f4;
+        }
+        .sheet-photo-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .sheet-photo-card .spc-dist {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(transparent, rgba(0,0,0,.6));
+            color: #fff;
+            font-size: 11px;
+            padding: 12px 8px 4px;
+        }
+        .sheet-photos-empty {
+            padding: 20px;
+            text-align: center;
+            color: #80868b;
+            font-size: 13px;
+        }
+        .sheet-content {
+            padding: 4px 20px 20px;
+        }
+        .sheet-title {
+            font-size: 20px;
+            font-weight: 500;
+            color: #202124;
+            line-height: 1.3;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            -webkit-box-orient: vertical;
+        }
+        .sheet-subtitle {
+            font-size: 14px;
+            color: #5f6368;
+            margin-top: 6px;
+            line-height: 1.4;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+        .sheet-coord {
+            font-size: 12px;
+            color: #80868b;
+            margin-top: 10px;
+            font-family: 'Menlo', 'Consolas', monospace;
+        }
+        .sheet-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+        .sheet-action {
+            padding: 10px 16px;
+            border-radius: 20px;
+            border: 1px solid #dadce0;
+            background: #fff;
+            color: #1a73e8;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: background .15s, border-color .15s;
+        }
+        .sheet-action:hover { background: #f1f3f4; }
+        .sheet-action.primary {
+            background: #1a73e8;
+            color: #fff;
+            border-color: #1a73e8;
+        }
+        .sheet-action.primary:hover { background: #1765cc; }
+        .sheet-action.starred {
+            background: #fff8e1;
+            color: #ea9800;
+            border-color: #fde293;
+        }
+        .sheet-action svg { width: 18px; height: 18px; fill: currentColor; }
+        .sheet-close-btn {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #5f6368;
+        }
+        .sheet-close-btn:hover { background: #f1f3f4; }
+        .sheet-close-btn svg { width: 18px; height: 18px; fill: currentColor; }
+
+        /* ========= 右下角 图层按钮 ========= */
+        .brand-area {
+            position: absolute;
+            left: 12px;
+            bottom: 8px;
+            z-index: 1000;
+            font-size: 11px;
+            color: rgba(0,0,0,.5);
+            pointer-events: none;
+        }
+
+        /* ========= 图层选择面板 ========= */
+        .layer-panel {
+            position: fixed;
+            right: 16px;
+            bottom: 80px;
+            z-index: 1001;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(60,64,67,.25), 0 4px 20px 2px rgba(60,64,67,.15);
+            padding: 12px;
+            width: 280px;
+            max-width: calc(100vw - 32px);
+            display: none;
+        }
+        .layer-panel.show { display: block; animation: fadeUp .18s ease-out; }
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .layer-panel-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: #202124;
+            margin-bottom: 10px;
+        }
+        .layer-panel-subtitle {
+            font-size: 11px;
+            color: #5f6368;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            margin: 12px 0 8px;
+        }
+        .layer-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .layer-tile {
+            cursor: pointer;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid #dadce0;
+            transition: border-color .15s, transform .15s;
+            background: #fff;
+        }
+        .layer-tile:hover { transform: translateY(-1px); }
+        .layer-tile.active { border-color: #1a73e8; }
+        .layer-tile-visual {
+            width: 100%;
+            height: 44px;
+        }
+        .lv-default {
+            background: linear-gradient(135deg, #a8c5d8 0%, #f5f2ed 50%, #e8e0d4 100%);
+        }
+        .lv-sat {
+            background: linear-gradient(135deg, #1a3a2a, #2d5a3d, #3d7a4d);
+        }
+        .lv-terrain {
+            background: linear-gradient(135deg, #d8c898 0%, #b8a888 40%, #8aaa88 100%);
+        }
+        .lv-dark {
+            background: linear-gradient(135deg, #1a1a2e, #2a2a3e, #1a1a2e);
+        }
+        .lv-bike {
+            background: linear-gradient(135deg, #e6f4ea, #9ccc9c, #6aaa6a);
+        }
+        .lv-transit {
+            background: linear-gradient(135deg, #e8f0fe, #d2e3fc, #9cc2f0);
+        }
+        .layer-tile-name {
+            font-size: 11px;
+            text-align: center;
+            padding: 6px 4px;
+            color: #202124;
+            font-weight: 500;
+        }
+        .layer-tile.active .layer-tile-name { color: #1a73e8; }
+
+        /* ========= 侧边菜单面板 ========= */
+        .side-panel {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 320px;
+            max-width: 90vw;
+            height: 100vh;
+            background: #fff;
+            z-index: 2000;
+            transform: translateX(-100%);
+            transition: transform .3s cubic-bezier(.4,0,.2,1);
+            box-shadow: 2px 0 16px rgba(0,0,0,.2);
+            display: flex;
+            flex-direction: column;
+        }
+        .side-panel.open { transform: translateX(0); }
+        .side-header {
+            padding: 20px;
+            background: #1a73e8;
+            color: #fff;
+        }
+        .side-title {
+            font-size: 22px;
+            font-weight: 500;
+            color: #fff;
+        }
+        .side-sub {
+            font-size: 13px;
+            color: rgba(255,255,255,.85);
+            margin-top: 4px;
+        }
+        .side-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+        }
+        .side-list::-webkit-scrollbar { width: 6px; }
+        .side-list::-webkit-scrollbar-thumb { background: #dadce0; border-radius: 3px; }
+        .side-section-title {
+            padding: 14px 20px 6px;
+            font-size: 11px;
+            color: #80868b;
+            text-transform: uppercase;
+            letter-spacing: .8px;
+            font-weight: 500;
+        }
+        .side-item {
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            cursor: pointer;
+            color: #202124;
+            font-size: 14px;
+        }
+        .side-item:hover { background: #f8f9fa; }
+        .side-item svg {
+            width: 22px; height: 22px;
+            fill: #5f6368;
+            flex-shrink: 0;
+        }
+        .side-item span { flex: 1; }
+        .side-item .badge {
+            background: #1a73e8;
+            color: #fff;
+            font-size: 11px;
+            padding: 2px 10px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+        .panel-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,.28);
+            z-index: 1500;
+            display: none;
+        }
+        .panel-overlay.show { display: block; }
+
+        /* ========= 路线面板 ========= */
+        .route-panel {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            z-index: 1500;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(60,64,67,.25), 0 2px 12px 2px rgba(60,64,67,.15);
+            width: 360px;
+            max-width: calc(100vw - 24px);
+            display: none;
+            overflow: hidden;
+        }
+        .route-panel.show { display: block; animation: fadeDown .18s ease-out; }
+        @keyframes fadeDown {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .route-header-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px;
+            border-bottom: 1px solid #e8eaed;
+        }
+        .route-back {
+            width: 40px; height: 40px;
+            border: none;
+            background: transparent;
+            border-radius: 50%;
+            cursor: pointer;
+            color: #5f6368;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .route-back:hover { background: #f1f3f4; }
+        .route-back svg { width: 22px; height: 22px; fill: currentColor; }
+        .route-mode-tabs {
+            flex: 1;
+            display: flex;
+            gap: 4px;
+        }
+        .route-mode-tab {
+            flex: 1;
+            padding: 8px 4px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            color: #5f6368;
+            font-size: 11px;
+            font-family: inherit;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            font-weight: 500;
+        }
+        .route-mode-tab svg { width: 20px; height: 20px; fill: currentColor; }
+        .route-mode-tab:hover { background: #f1f3f4; }
+        .route-mode-tab.active { color: #1a73e8; background: #e8f0fe; }
+
+        .route-inputs {
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            border-bottom: 1px solid #e8eaed;
+        }
+        .route-input-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            height: 40px;
+            background: #f1f3f4;
+            border-radius: 8px;
+            padding: 0 12px;
+        }
+        .route-input-row .dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .route-input-row .dot.from { background: #1a73e8; }
+        .route-input-row .dot.to { background: #34a853; }
+        .route-input-row input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            outline: none;
+            font-size: 14px;
+            color: #202124;
+            font-family: inherit;
+        }
+        .route-input-row input::placeholder { color: #80868b; }
+        .route-input-row .small-btn {
+            width: 28px; height: 28px;
+            border: none;
+            background: transparent;
+            border-radius: 50%;
+            cursor: pointer;
+            color: #5f6368;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .route-input-row .small-btn:hover { background: #e8eaed; }
+        .route-input-row .small-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+        .route-summary-row {
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: #f8f9fa;
+        }
+        .route-sum-info { flex: 1; }
+        .route-sum-time {
+            font-size: 20px;
+            font-weight: 500;
+            color: #1a73e8;
+        }
+        .route-sum-dist {
+            font-size: 13px;
+            color: #5f6368;
+            margin-top: 2px;
+        }
+        .route-sum-btn {
+            padding: 8px 18px;
+            border-radius: 20px;
+            border: none;
+            background: #1a73e8;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .route-sum-btn:hover { background: #1765cc; }
+        .route-sum-btn:disabled { background: #dadce0; color: #5f6368; cursor: not-allowed; }
+
+        .route-steps {
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+        .route-steps.show { display: block; }
+        .route-step {
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid #f1f3f4;
+        }
+        .route-step:last-child { border-bottom: none; }
+        .route-step-arrow {
+            font-size: 18px;
+            color: #1a73e8;
+            font-weight: 600;
+            width: 24px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .route-step-text {
+            flex: 1;
+            font-size: 13px;
+            color: #202124;
+            line-height: 1.4;
+        }
+        .route-step-dist {
+            font-size: 12px;
+            color: #5f6368;
+            white-space: nowrap;
+        }
+
+        /* ========= 导航面板 ========= */
+        .nav-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 1600;
+            pointer-events: none;
+        }
+        .nav-overlay.show { pointer-events: auto; }
+        .nav-top {
+            position: absolute;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #fff;
+            color: #202124;
+            border-radius: 20px;
+            padding: 12px 16px;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,.2);
+            width: min(420px, calc(100vw - 40px));
+            z-index: 1610;
+        }
+        .nav-overlay.show .nav-top { display: flex; }
+        .nav-turn-main {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .nav-turn-icon {
+            width: 48px; height: 48px;
+            background: #1a73e8;
+            color: #fff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+        .nav-turn-text {
+            flex: 1;
+            min-width: 0;
+        }
+        .nav-turn-instr {
+            font-size: 17px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #202124;
+        }
+        .nav-turn-dist {
+            font-size: 13px;
+            color: #5f6368;
+            margin-top: 2px;
+            font-weight: 500;
+        }
+        .nav-turn-next {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #e8eaed;
+            font-size: 13px;
+            color: #5f6368;
+        }
+        .nav-turn-next.show { display: flex; }
+        .nav-turn-next-label { flex-shrink: 0; font-weight: 500; color: #1a73e8; }
+        .nav-turn-next-icon { font-size: 16px; }
+        .nav-turn-next-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .nav-tts-toggle {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 36px; height: 36px;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0,0,0,.15);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 1610;
+        }
+        .nav-tts-toggle svg { width: 20px; height: 20px; fill: #5f6368; }
+        .nav-tts-toggle.active svg { fill: #1a73e8; }
+        .nav-overlay.show .nav-tts-toggle { display: flex; }
+        .nav-bottom {
+            position: absolute;
+            bottom: 24px;
+            left: 12px;
+            right: 12px;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 1610;
+        }
+        .nav-overlay.show .nav-bottom { display: flex; }
+        .nav-status-bar {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,.15);
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .nav-eta {
+            flex: 1;
+        }
+        .nav-eta-time {
+            font-size: 22px;
+            font-weight: 500;
+            color: #202124;
+        }
+        .nav-eta-dist {
+            font-size: 13px;
+            color: #5f6368;
+            margin-top: 2px;
+        }
+        .nav-speed {
+            font-size: 13px;
+            color: #5f6368;
+            background: #f1f3f4;
+            padding: 6px 12px;
+            border-radius: 14px;
+            flex-shrink: 0;
+        }
+        .nav-progress {
+            height: 3px;
+            background: #e8eaed;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .nav-progress-fill {
+            height: 100%;
+            background: #1a73e8;
+            transition: width .3s ease;
+        }
+        .nav-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+        }
+        .nav-btn {
+            padding: 10px 24px;
+            border-radius: 22px;
+            border: none;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            box-shadow: 0 2px 6px rgba(0,0,0,.15);
+        }
+        .nav-btn-stop {
+            background: #fff;
+            color: #d93025;
+        }
+        .nav-btn-stop:hover { background: #fce8e6; }
+        .nav-btn-recenter {
+            background: #fff;
+            color: #1a73e8;
+        }
+        .nav-btn-recenter:hover { background: #e8f0fe; }
+        .nav-compass {
+            width: 40px; height: 40px;
+            position: absolute;
+            top: 80px;
+            right: 16px;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0,0,0,.15);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 1610;
+            transition: transform .15s;
+        }
+        .nav-overlay.show .nav-compass { display: flex; }
+        .nav-compass svg { width: 22px; height: 22px; fill: #1a73e8; }
+        .nav-offroute {
+            position: absolute;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #d93025;
+            color: #fff;
+            padding: 8px 18px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            display: none;
+            z-index: 1610;
+            box-shadow: 0 2px 8px rgba(0,0,0,.2);
+            white-space: nowrap;
+        }
+
+        /* ========= 定位蓝点 ========= */
+        .loc-dot {
+            width: 18px; height: 18px;
+            border-radius: 50%;
+            background: #1a73e8;
+            border: 3px solid #fff;
+            box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 0 0 0 rgba(26,115,232,.5);
+            animation: dot-pulse 2s ease-out infinite;
+        }
+        @keyframes dot-pulse {
+            0% { box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 0 0 0 rgba(26,115,232,.5); }
+            70% { box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 0 0 20px rgba(26,115,232,0); }
+            100% { box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 0 0 0 rgba(26,115,232,0); }
+        }
+
+        /* ========= 地图标记 ========= */
+        .pin-marker {
+            width: 30px; height: 42px;
+            transform-origin: 15px 42px;
+            animation: pin-drop .35s cubic-bezier(.4,0,.2,1);
+        }
+        @keyframes pin-drop {
+            0% { transform: translateY(-30px) scale(.8); opacity: 0; }
+            60% { transform: translateY(0) scale(1.05); opacity: 1; }
+            100% { transform: translateY(0) scale(1); opacity: 1; }
+        }
+        .pin-marker svg { width: 100%; height: 100%; filter: drop-shadow(0 2px 4px rgba(0,0,0,.35)); }
+
+        /* ========= 街景（附近照片） ========= */
+        .streetview-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 3000;
+            background: #202124;
+            display: none;
+            flex-direction: column;
+            color: #fff;
+        }
+        .streetview-overlay.show {
+            display: flex;
+            animation: fadeIn .25s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .streetview-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            height: 56px;
+            background: #202124;
+            border-bottom: 1px solid rgba(255,255,255,.08);
+            color: #fff;
+            flex-shrink: 0;
+        }
+        .streetview-header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+        }
+        .streetview-title {
+            font-size: 16px;
+            font-weight: 500;
+        }
+        .streetview-sub {
+            font-size: 12px;
+            color: #9aa0a6;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 320px;
+        }
+        .streetview-close {
+            width: 40px; height: 40px;
+            border: none;
+            background: transparent;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .streetview-close:hover { background: rgba(255,255,255,.12); }
+        .streetview-close svg { width: 22px; height: 22px; fill: currentColor; }
+
+        /* 图片网格 */
+        .streetview-grid-wrap {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #202124;
+        }
+        .streetview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 12px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .streetview-grid-empty {
+            text-align: center;
+            padding: 80px 20px;
+            color: #9aa0a6;
+            grid-column: 1/-1;
+        }
+        .streetview-grid-empty svg {
+            width: 64px; height: 64px;
+            opacity: .4;
+            margin-bottom: 16px;
+        }
+        .photo-card {
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            background: #2a2c30;
+            aspect-ratio: 4/3;
+            transition: transform .15s ease, box-shadow .15s ease;
+        }
+        .photo-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 18px rgba(0,0,0,.45);
+        }
+        .photo-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .photo-card-title {
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            padding: 10px 12px;
+            background: linear-gradient(to top, rgba(0,0,0,.8), transparent);
+            font-size: 12px;
+            color: #fff;
+            line-height: 1.3;
+            max-height: 56px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+        .photo-card-dist {
+            position: absolute;
+            top: 8px; right: 8px;
+            background: rgba(0,0,0,.6);
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            color: #fff;
+        }
+
+        /* 加载状态 */
+        .streetview-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 80px 20px;
+            color: #9aa0a6;
+            flex-direction: column;
+            gap: 14px;
+            grid-column: 1/-1;
+        }
+        .spinner {
+            width: 36px; height: 36px;
+            border: 3px solid rgba(255,255,255,.15);
+            border-top-color: #1a73e8;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 大图预览 */
+        .photo-viewer {
+            position: fixed;
+            inset: 0;
+            z-index: 3100;
+            background: rgba(0,0,0,.95);
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .photo-viewer.show { display: flex; }
+        .photo-viewer img {
+            max-width: 92vw;
+            max-height: 86vh;
+            object-fit: contain;
+            box-shadow: 0 10px 40px rgba(0,0,0,.6);
+        }
+        .photo-viewer-btn {
+            position: absolute;
+            background: rgba(255,255,255,.1);
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 50%;
+            width: 48px; height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background .15s;
+        }
+        .photo-viewer-btn:hover { background: rgba(255,255,255,.2); }
+        .photo-viewer-btn svg { width: 26px; height: 26px; fill: currentColor; }
+        .photo-viewer-prev { left: 24px; top: 50%; transform: translateY(-50%); }
+        .photo-viewer-next { right: 24px; top: 50%; transform: translateY(-50%); }
+        .photo-viewer-close { top: 24px; right: 24px; width: 40px; height: 40px; }
+        .photo-viewer-close svg { width: 22px; height: 22px; }
+        .photo-viewer-caption {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-size: 14px;
+            text-align: center;
+            max-width: 80vw;
+            padding: 8px 14px;
+            background: rgba(0,0,0,.5);
+            border-radius: 6px;
+        }
+        .photo-viewer-counter {
+            position: absolute;
+            top: 32px;
+            left: 24px;
+            color: #9aa0a6;
+            font-size: 13px;
+        }
+
+        
+
+        /* ========= 下载瓦片面板 ========= */
+        .tile-download-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 2900;
+            background: rgba(32,33,36,.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .tile-download-overlay.show { display: flex; }
+        .tile-download-panel {
+            background: #fff;
+            border-radius: 12px;
+            width: 400px;
+            max-width: calc(100vw - 32px);
+            box-shadow: 0 8px 32px rgba(0,0,0,.28);
+            overflow: hidden;
+            animation: slideUp .2s ease-out;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .tile-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid #e8eaed;
+        }
+        .tile-panel-title { font-size: 16px; font-weight: 500; color: #202124; }
+        .tile-panel-close {
+            width: 32px; height: 32px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #5f6368;
+        }
+        .tile-panel-close:hover { background: #f1f3f4; }
+        .tile-panel-close svg { width: 20px; height: 20px; fill: currentColor; }
+        .tile-panel-body { padding: 20px; }
+        .tile-field { margin-bottom: 16px; }
+        .tile-field:last-child { margin-bottom: 0; }
+        .tile-label {
+            font-size: 12px;
+            font-weight: 500;
+            color: #5f6368;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+        .tile-range-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .tile-range-row select {
+            flex: 1;
+            padding: 8px 10px;
+            border: 1px solid #dadce0;
+            border-radius: 6px;
+            font-size: 14px;
+            color: #202124;
+            background: #fff;
+            cursor: pointer;
+        }
+        .tile-range-row select:focus { outline: none; border-color: #1a73e8; }
+        .tile-range-sep { color: #9aa0a6; font-size: 14px; }
+        .tile-area-info {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 10px 12px;
+            font-size: 13px;
+            color: #5f6368;
+            line-height: 1.5;
+        }
+        .tile-area-info strong { color: #202124; }
+        .tile-hint {
+            font-size: 12px;
+            color: #80868b;
+            margin-top: 6px;
+            line-height: 1.4;
+        }
+        .tile-layer-select {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #dadce0;
+            border-radius: 6px;
+            font-size: 14px;
+            color: #202124;
+            background: #fff;
+            cursor: pointer;
+        }
+        .tile-layer-select:focus { outline: none; border-color: #1a73e8; }
+        .tile-panel-footer {
+            padding: 12px 20px;
+            border-top: 1px solid #e8eaed;
+            display: flex;
+            gap: 10px;
+        }
+        .tile-btn {
+            flex: 1;
+            padding: 9px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: background .15s;
+        }
+        .tile-btn-cancel {
+            background: #f8f9fa;
+            color: #1a73e8;
+        }
+        .tile-btn-cancel:hover { background: #e8eaed; }
+        .tile-btn-primary {
+            background: #1a73e8;
+            color: #fff;
+        }
+        .tile-btn-primary:hover { background: #1557b0; }
+        .tile-btn-primary:disabled { background: #dadce0; color: #80868b; cursor: not-allowed; }
+        .tile-btn-secondary {
+            background: #f8f9fa;
+            color: #202124;
+            border: 1px solid #dadce0;
+        }
+        .tile-btn-secondary:hover { background: #e8eaed; }
+
+        /* 瓦片下载进度 */
+        .tile-progress-wrap {
+            display: none;
+            padding: 20px;
+            text-align: center;
+        }
+        .tile-progress-wrap.show { display: block; }
+        .tile-progress-text { font-size: 14px; color: #202124; margin-bottom: 12px; }
+        .tile-progress-bar-wrap {
+            background: #e8eaed;
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+        }
+        .tile-progress-bar {
+            height: 100%;
+            background: #1a73e8;
+            border-radius: 10px;
+            transition: width .1s;
+            width: 0%;
+        }
+        .tile-progress-detail { font-size: 12px; color: #80868b; margin-top: 8px; }
+
+        /* 离线导入 */
+        .tile-import-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #e8eaed;
+        }
+        .tile-import-row input[type="file"] {
+            display: none;
+        }
+        .offline-badge {
+            display: inline-block;
+            background: #e8f5e9;
+            color: #2e7d32;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+
+        /* 地区搜索输入 */
+        .tile-region-input {
+            width: 100%;
+            padding: 9px 12px;
+            border: 1px solid #dadce0;
+            border-radius: 6px;
+            font-size: 14px;
+            color: #202124;
+            outline: none;
+            box-sizing: border-box;
+        }
+        .tile-region-input:focus { border-color: #1a73e8; }
+        .tile-region-results {
+            position: absolute;
+            left: 0; right: 0;
+            top: 100%;
+            background: #fff;
+            border: 1px solid #dadce0;
+            border-radius: 0 0 6px 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,.15);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+        }
+        .tile-region-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #202124;
+            border-bottom: 1px solid #f1f3f4;
+        }
+        .tile-region-item:hover { background: #e8f0fe; }
+        .tile-region-item:last-child { border-bottom: none; }
+        .tile-region-item-name { font-weight: 500; }
+        .tile-region-item-sub { color: #80868b; font-size: 11px; margin-top: 2px; }
+        .tile-region-loading {
+            padding: 12px;
+            text-align: center;
+            color: #80868b;
+            font-size: 13px;
+        }
+
+        /* ========= Toast ========= */
+        #toast {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: #323232;
+            color: #fff;
+            padding: 10px 22px;
+            border-radius: 6px;
+            font-size: 13px;
+            z-index: 3000;
+            opacity: 0;
+            transition: all .25s;
+            pointer-events: none;
+            max-width: 80vw;
+        }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .leaflet-control-attribution { display: none !important; }
+
+        /* ========= 移动端 ========= */
+        @media (max-width: 640px) {
+            .search-panel, .route-panel { width: calc(100vw - 24px); }
+            .sheet-title { font-size: 17px; }
+            .bottom-sheet { max-height: 50vh; }
+            .layer-panel { width: calc(100vw - 24px); }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="panel-overlay" id="panel-overlay"></div>
+
+    <!-- ========= 搜索面板 ========= -->
+    <div class="search-panel" id="search-panel">
+        <div class="search-bar">
+            <button class="icon-btn" id="menu-btn" title="菜单">
+                <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+            </button>
+            <input type="text" class="search-input" id="search-input" placeholder="搜索" autocomplete="off" spellcheck="false">
+            <div class="search-actions">
+                <button class="clear-btn" id="s-clear" title="清除">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+                <button class="mic-btn" id="mic-btn" title="语音搜索（左键录音，右键上传音频文件）">
+                    <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>
+                </button>
+                <input type="file" id="audio-file-input" accept="audio/*" style="display:none">
+            </div>
+        </div>
+        <div id="results-area" style="display:none">
+            <div class="search-divider"></div>
+            <div class="search-results" id="search-results"></div>
+        </div>
+    </div>
+
+    <!-- ========= 路线面板 ========= -->
+    <div class="route-panel" id="route-panel">
+        <div class="route-header-row">
+            <button class="route-back" id="route-back"><svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button>
+            <div class="route-mode-tabs">
+                <button class="route-mode-tab active" data-mode="driving">
+                    <svg viewBox="0 0 24 24"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.22.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
+                    驾车
+                </button>
+                <button class="route-mode-tab" data-mode="walking">
+                    <svg viewBox="0 0 24 24"><path d="M13.5 5.5c1.1 0 2-.6 2-2s0-2-2-2-2 2-2 2 2 1.34 2 2 2 2 2 2 2-2 2-2 2-2zm0 3c-3.87 0-7 3.13-7 7v3h14v-3c0-3.87-3.13-7-7-7zm1.5 8.5h-3v-3h3v3z" opacity="0"/><path d="M12 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-5 11h2v-7.5l-1-1V14h-2v7zm4 0h2v-7.5l-.5-1h-.5V21zm4 0h2v-5.5l-1-1V17h-2v4z"/><circle cx="12" cy="3.5" r="2"/></svg>
+                    步行
+                </button>
+                <button class="route-mode-tab" data-mode="cycling">
+                    <svg viewBox="0 0 24 24"><path d="M5 20.5A3.5 3.5 0 0 1 1.5 17 3.5 3.5 0 0 1 5 13.5 3.5 3.5 0 0 1 8.5 17 3.5 3.5 0 0 1 5 20.5zM5 12a5 5 0 0 0-5 5 5 5 0 0 0 5 5 5 5 0 0 0 5-5 5 5 0 0 0-5-5zm14.8 8.5A3.5 3.5 0 0 1 16.3 17a3.5 3.5 0 0 1 3.5-3.5 3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5zm0-8.5a5 5 0 0 0-5 5 5 5 0 0 0 5 5 5 5 0 0 0 5-5 5 5 0 0 0-5-5zM14.8 7l-1.5-3.7c-.3-.7-1-1.3-1.8-1.3H8v1.5h3.5l1.5 3.7L11.5 10c-.3.4-.5.9-.5 1.5 0 1.4 1.1 2.5 2.5 2.5h6v-1.5h-6c-.3 0-.5-.2-.5-.5 0-.1 0-.3.1-.4l1.5-2.6c.2-.3.2-.7 0-1L14.8 7z"/></svg>
+                    骑行
+                </button>
+            </div>
+        </div>
+        <div class="route-inputs">
+            <div class="route-input-row">
+                <div class="dot from"></div>
+                <input type="text" id="route-from" placeholder="起点（默认当前位置）" autocomplete="off">
+                <button class="small-btn" id="route-use-loc" title="使用当前位置">
+                    <svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+                </button>
+            </div>
+            <div class="route-input-row">
+                <div class="dot to"></div>
+                <input type="text" id="route-to" placeholder="选择终点" autocomplete="off">
+                <button class="small-btn" id="route-swap" title="交换">
+                    <svg viewBox="0 0 24 24"><path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/></svg>
+                </button>
+            </div>
+        </div>
+        <div class="route-summary-row">
+            <div class="route-sum-info">
+                <div class="route-sum-time" id="route-duration">--</div>
+                <div class="route-sum-dist" id="route-distance">输入起终点后查询</div>
+            </div>
+            <button class="route-sum-btn" id="route-go">查询</button>
+        </div>
+        <div class="route-steps" id="route-steps"></div>
+        <div class="route-summary-row" id="route-nav-row" style="display:none">
+            <button class="route-sum-btn" id="route-nav-start" style="background:#0f9d58;width:100%">开始导航</button>
+        </div>
+    </div>
+
+    <!-- ========= 导航面板 ========= -->
+    <div class="nav-overlay" id="nav-overlay">
+        <div class="nav-top" id="nav-top">
+            <div class="nav-turn-main">
+                <div class="nav-turn-icon" id="nav-turn-icon">↑</div>
+                <div class="nav-turn-text">
+                    <div class="nav-turn-instr" id="nav-turn-instr">继续前行</div>
+                    <div class="nav-turn-dist" id="nav-turn-dist"></div>
+                </div>
+            </div>
+            <div class="nav-turn-next" id="nav-turn-next">
+                <div class="nav-turn-next-label">随后</div>
+                <div class="nav-turn-next-icon" id="nav-turn-next-icon">↑</div>
+                <div class="nav-turn-next-text" id="nav-turn-next-text">--</div>
+            </div>
+        </div>
+        <div class="nav-offroute" id="nav-offroute">已偏离路线，正在重新规划...</div>
+        <div class="nav-compass" id="nav-compass" title="重置朝向">
+            <svg viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71L12 2z"/></svg>
+        </div>
+        <div class="nav-tts-toggle" id="nav-tts-toggle" title="语音播报">
+            <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+        </div>
+        <div class="nav-bottom">
+            <div class="nav-status-bar">
+                <div class="nav-eta">
+                    <div class="nav-eta-time" id="nav-eta-time">-- 分钟</div>
+                    <div class="nav-eta-dist" id="nav-eta-dist">-- 公里</div>
+                </div>
+                <div class="nav-speed" id="nav-speed">-- km/h</div>
+            </div>
+            <div class="nav-progress">
+                <div class="nav-progress-fill" id="nav-progress-fill" style="width:0%"></div>
+            </div>
+            <div class="nav-actions">
+                <button class="nav-btn nav-btn-recenter" id="nav-btn-recenter">重新居中</button>
+                <button class="nav-btn nav-btn-stop" id="nav-btn-stop">停止导航</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========= 侧边菜单 ========= -->
+    <div class="side-panel" id="side-panel">
+        <div class="side-header">
+            <div class="side-title">地图</div>
+            <div class="side-sub">探索 · 路线 · 位置</div>
+        </div>
+        <div class="side-list">
+            <div class="side-section-title">探索</div>
+            <div class="side-item" data-action="route">
+                <svg viewBox="0 0 24 24"><path d="M21.71 11.29l-9-9c-.39-.39-1.02-.39-1.41 0l-9 9c-.39.39-.39 1.02 0 1.41l9 9c.39.39 1.02.39 1.41 0l9-9c.38-.38.38-1.02-.01-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/></svg>
+                <span>路线规划</span>
+            </div>
+            <div class="side-item" data-action="places">
+                <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                <span>您的地点</span>
+                <div class="badge" id="places-count">0</div>
+            </div>
+            <div class="side-item" data-action="explore">
+                <svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                <span>附近地标</span>
+            </div>
+
+            <div class="side-section-title">地图</div>
+            <div class="side-item" data-action="layer-switch">
+                <svg viewBox="0 0 24 24"><path d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/></svg>
+                <span>切换地图类型</span>
+            </div>
+            <div class="side-item" data-action="street-view">
+                <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                <span>街景</span>
+            </div>
+            <div class="side-item" data-action="download-tiles">
+                <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                <span>下载瓦片</span>
+            </div>
+            <div class="side-item" data-action="share-link">
+                <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
+                <span>分享位置链接</span>
+            </div>
+
+            <div class="side-section-title">设置</div>
+            <div class="side-item" data-action="unit-switch">
+                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                <span>距离单位</span>
+                <div class="badge" id="unit-badge" style="background:#dadce0;color:#5f6368">公里</div>
+            </div>
+            <div class="side-item" data-action="about">
+                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-6h2v6zm0-8h-2V7h2v4z"/></svg>
+                <span>关于地图</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========= 收藏地点弹窗 ========= -->
+    <div class="route-panel" id="places-panel" style="top:auto; bottom:80px;">
+        <div class="route-header-row">
+            <button class="route-back" id="places-back"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+            <div style="flex:1; font-size:15px; font-weight:500;">您的地点</div>
+        </div>
+        <div class="search-results" id="places-list" style="max-height: 300px;"></div>
+    </div>
+
+    <!-- ========= 关于弹窗 ========= -->
+    <div class="route-panel" id="about-panel" style="top:auto; bottom:80px; width: 320px;">
+        <div class="route-header-row">
+            <button class="route-back" id="about-back"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+            <div style="flex:1; font-size:15px; font-weight:500;">关于地图</div>
+        </div>
+        <div style="padding: 16px 20px 20px; font-size: 13px; color: #5f6368; line-height: 1.8;">
+            <div style="font-size: 16px; color: #1a73e8; font-weight: 500; margin-bottom: 6px;">地图应用 v2.0</div>
+            基于 Leaflet + OpenStreetMap 构建<br>
+            瓦片服务: CARTO · Esri<br>
+            搜索: Photon · Nominatim<br>
+            路线: OSRM<br>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e8eaed; color: #80868b; font-size: 11px;">
+                快捷键: / 搜索 · + 放大 · - 缩小 · Esc 关闭
+            </div>
+        </div>
+    </div>
+
+    <!-- ========= 下载瓦片面板 ========= -->
+    <div class="tile-download-overlay" id="tile-download-overlay">
+        <div class="tile-download-panel" id="tile-download-panel">
+            <div class="tile-panel-header">
+                <span class="tile-panel-title">瓦片管理</span>
+                <button class="tile-panel-close" id="tile-panel-close">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <div class="tile-panel-body" id="tile-panel-body">
+                <div class="tile-field">
+                    <div class="tile-label">选择地区</div>
+                    <div style="position:relative">
+                        <input type="text" id="tile-region-input" class="tile-region-input" placeholder="输入国家、省或城市名称…" autocomplete="off">
+                        <div class="tile-region-results" id="tile-region-results" style="display:none"></div>
+                    </div>
+                    <div class="tile-area-info" id="tile-area-info" style="margin-top:8px">
+                        请输入地区名称搜索
+                    </div>
+                    <div class="tile-hint" id="tile-hint">瓦片数量取决于范围大小和缩放级别，高级别瓦片数量会急剧增加</div>
+                </div>
+                <div class="tile-field">
+                    <div class="tile-label">地图类型</div>
+                    <select class="tile-layer-select" id="tile-layer-select"></select>
+                </div>
+                <div class="tile-field">
+                    <div class="tile-label">缩放级别</div>
+                    <div class="tile-range-row">
+                        <select id="tile-zoom-min"></select>
+                        <span class="tile-range-sep">至</span>
+                        <select id="tile-zoom-max"></select>
+                    </div>
+                </div>
+                <div class="tile-import-row">
+                    <button class="tile-btn tile-btn-secondary" id="tile-btn-import" style="flex:1">导入离线瓦片</button>
+                    <input type="file" id="tile-import-file" accept=".zip">
+                    <span id="offline-status"></span>
+                </div>
+            </div>
+            <div class="tile-progress-wrap" id="tile-progress-wrap">
+                <div class="tile-progress-text" id="tile-progress-text">正在下载…</div>
+                <div class="tile-progress-bar-wrap">
+                    <div class="tile-progress-bar" id="tile-progress-bar"></div>
+                </div>
+                <div class="tile-progress-detail" id="tile-progress-detail"></div>
+            </div>
+            <div class="tile-panel-footer" id="tile-panel-footer">
+                <button class="tile-btn tile-btn-cancel" id="tile-btn-cancel">取消</button>
+                <button class="tile-btn tile-btn-primary" id="tile-btn-download" disabled>下载 ZIP</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========= 右侧悬浮按钮 ========= -->
+    <div class="floating-col">
+        <div class="fab-group">
+            <button class="fab-btn primary" id="btn-directions" title="路线">
+                <svg viewBox="0 0 24 24"><path d="M21.71 11.29l-9-9c-.39-.39-1.02-.39-1.41 0l-9 9c-.39.39-.39 1.02 0 1.41l9 9c.39.39 1.02.39 1.41 0l9-9c.38-.38.38-1.02-.01-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/></svg>
+            </button>
+            <button class="fab-btn" id="btn-street" title="街景">
+                <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+            </button>
+            <button class="fab-btn" id="btn-layer" title="图层">
+                <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            </button>
+        </div>
+        <div class="zoom-group">
+            <button class="zoom-btn" id="z-in" title="放大">
+                <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+            </button>
+            <button class="zoom-btn" id="z-out" title="缩小">
+                <svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- ========= 可拖动的定位按钮 ========= -->
+    <div class="locate-wrap" id="locate-wrap">
+        <button class="locate-btn" id="btn-locate" title="定位到当前位置">
+            <svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+        </button>
+    </div>
+
+    <!-- ========= 左下角品牌 ========= -->
+    <div class="brand-area">地图 v2.0</div>
+
+    <!-- ========= 图层选择面板 ========= -->
+    <div class="layer-panel" id="layer-panel">
+        <div class="layer-panel-title">地图类型</div>
+        <div class="layer-grid">
+            <div class="layer-tile active" data-layer="voyager">
+                <div class="layer-tile-visual lv-default"></div>
+                <div class="layer-tile-name">地图</div>
+            </div>
+            <div class="layer-tile" data-layer="satellite">
+                <div class="layer-tile-visual lv-sat"></div>
+                <div class="layer-tile-name">卫星</div>
+            </div>
+            <div class="layer-tile" data-layer="topo">
+                <div class="layer-tile-visual lv-terrain"></div>
+                <div class="layer-tile-name">地形</div>
+            </div>
+            <div class="layer-tile" data-layer="dark">
+                <div class="layer-tile-visual lv-dark"></div>
+                <div class="layer-tile-name">暗色</div>
+            </div>
+            <div class="layer-tile" data-layer="transit">
+                <div class="layer-tile-visual lv-transit"></div>
+                <div class="layer-tile-name">交通</div>
+            </div>
+            <div class="layer-tile" data-layer="bike">
+                <div class="layer-tile-visual lv-bike"></div>
+                <div class="layer-tile-name">骑行</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========= 底部位置卡片 ========= -->
+    <div class="bottom-sheet" id="bottom-sheet">
+        <div class="sheet-handle"></div>
+        <button class="sheet-close-btn" id="sheet-close">
+            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+        <div class="sheet-content">
+            <div class="sheet-title" id="place-title">--</div>
+            <div class="sheet-subtitle" id="place-sub">--</div>
+            <div class="sheet-coord" id="place-coord">--</div>
+            <div class="sheet-actions">
+                <button class="sheet-action primary" id="btn-route-to">
+                    <svg viewBox="0 0 24 24"><path d="M21.71 11.29l-9-9c-.39-.39-1.02-.39-1.41 0l-9 9c-.39.39-.39 1.02 0 1.41l9 9c.39.39 1.02.39 1.41 0l9-9c.38-.38.38-1.02-.01-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/></svg>
+                    路线
+                </button>
+                <button class="sheet-action" id="btn-star">
+                    <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                    收藏
+                </button>
+                <button class="sheet-action" id="btn-street-view">
+                    <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                    街景
+                </button>
+                <button class="sheet-action" id="btn-copy-coord">
+                    <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+                    复制坐标
+                </button>
+                <button class="sheet-action" id="btn-share">
+                    <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
+                    分享
+                </button>
+            </div>
+            <div class="sheet-photos" id="sheet-photos" style="display:none;">
+                <div class="sheet-photos-title">
+                    <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:#5f6368;"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                    附近照片
+                </div>
+                <div class="sheet-photos-grid" id="sheet-photos-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <!-- ========= 街景（附近照片）模态框 ========= -->
+    <div class="streetview-overlay" id="streetview-overlay">
+        <div class="streetview-header">
+            <div class="streetview-header-left">
+                <span class="streetview-title">附近照片</span>
+                <span class="streetview-sub" id="streetview-sub"></span>
+            </div>
+            <button class="streetview-close" id="streetview-close">
+                <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+        </div>
+        <div class="streetview-grid-wrap">
+            <div class="streetview-grid" id="streetview-grid"></div>
+        </div>
+    </div>
+
+    <!-- ========= 照片大图预览 ========= -->
+    <div class="photo-viewer" id="photo-viewer">
+        <span class="photo-viewer-counter" id="photo-viewer-counter"></span>
+        <button class="photo-viewer-btn photo-viewer-close" id="photo-viewer-close">
+            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+        <button class="photo-viewer-btn photo-viewer-prev" id="photo-viewer-prev">
+            <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+        </button>
+        <img id="photo-viewer-img" alt="">
+        <button class="photo-viewer-btn photo-viewer-next" id="photo-viewer-next">
+            <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+        </button>
+        <div class="photo-viewer-caption" id="photo-viewer-caption"></div>
+    </div>
+
+    
+
+    <script src="jszip.min.js"></script>
+    <script src="leaflet.js"></script>
+    <script>
+    (function() {
+        'use strict';
+
+        // ==== 工具 ====
+        function toast(msg) {
+            var t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            clearTimeout(t._t);
+            t._t = setTimeout(function() { t.classList.remove('show'); }, 2500);
+        }
+        function fetchWithTimeout(url, opts) {
+            opts = opts || {};
+            var timeout = opts.timeout || 15000;
+            return new Promise(function(resolve, reject) {
+                var timer = setTimeout(function() { reject(new Error('timeout')); }, timeout);
+                fetch(url, { mode: 'cors' }).then(function(r) {
+                    clearTimeout(timer);
+                    resolve(r);
+                }).catch(function(e) {
+                    clearTimeout(timer);
+                    reject(e);
+                });
+            });
+        }
+        function esc(s) {
+            return String(s).replace(/[&<>"']/g, function(c){
+                return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+            });
+        }
+        function fmtCoord(lat, lng) {
+            return lat.toFixed(6) + '°N  ' + lng.toFixed(6) + '°E';
+        }
+        function fmtDist(m) {
+            return settings.unit === 'mi'
+                ? (m / 1609.34).toFixed(1) + ' mi'
+                : (m >= 1000 ? (m / 1000).toFixed(1) + ' km' : m.toFixed(0) + ' m');
+        }
+        function fmtDur(sec) {
+            if (sec < 60) return sec + ' 秒';
+            if (sec < 3600) return Math.floor(sec / 60) + ' 分钟';
+            return Math.floor(sec / 3600) + ' 小时' + Math.floor((sec % 3600) / 60) + ' 分';
+        }
+
+        // ==== 设置 ====
+        var settings = (function() {
+            try {
+                var s = JSON.parse(localStorage.getItem('map_settings') || '{}');
+                return {
+                    unit: (s.unit === 'km' || s.unit === 'mi') ? s.unit : 'km',
+                    defaultLayer: typeof s.defaultLayer === 'string' ? s.defaultLayer : 'voyager',
+                    // 上次的地图视图：恢复用户上次的中心点、缩放级别
+                    lastView: (s.lastView && typeof s.lastView.lat === 'number' && typeof s.lastView.lng === 'number' && typeof s.lastView.zoom === 'number')
+                        ? s.lastView : null
+                };
+            } catch(e) { return { unit: 'km', defaultLayer: 'voyager', lastView: null }; }
+        })();
+        function saveSettings() { localStorage.setItem('map_settings', JSON.stringify(settings)); }
+        // 保存当前地图视图（中心点 + 缩放级别）
+        function saveLastView() {
+            try {
+                var c = map.getCenter();
+                settings.lastView = { lat: c.lat, lng: c.lng, zoom: map.getZoom() };
+                saveSettings();
+            } catch (e) { /* ignore */ }
+        }
+
+        // ==== 收藏 ====
+        var savedPlaces = (function() {
+            try {
+                var arr = JSON.parse(localStorage.getItem('map_places') || '[]');
+                if (!Array.isArray(arr)) return [];
+                return arr.filter(function(p) {
+                    return p && typeof p.name === 'string' && typeof p.lat === 'number' && typeof p.lng === 'number'
+                        && isFinite(p.lat) && isFinite(p.lng);
+                });
+            } catch(e) { return []; }
+        })();
+        function savePlaces() { localStorage.setItem('map_places', JSON.stringify(savedPlaces)); updatePlacesCount(); }
+        function updatePlacesCount() { document.getElementById('places-count').textContent = savedPlaces.length; }
+        function isStarred(lat, lng) {
+            return savedPlaces.some(function(p) { return Math.abs(p.lat - lat) < 0.0001 && Math.abs(p.lng - lng) < 0.0001; });
+        }
+        function toggleStar(lat, lng, name, sub) {
+            var idx = -1;
+            savedPlaces.forEach(function(p, i) {
+                if (Math.abs(p.lat - lat) < 0.0001 && Math.abs(p.lng - lng) < 0.0001) idx = i;
+            });
+            if (idx >= 0) { savedPlaces.splice(idx, 1); toast('已取消收藏'); }
+            else { savedPlaces.push({ lat: lat, lng: lng, name: name, sub: sub, ts: Date.now() }); toast('已收藏到地点'); }
+            savePlaces();
+            updateStarBtn();
+        }
+        function updateStarBtn() {
+            var btn = document.getElementById('btn-star');
+            if (!btn || !lastLat) return;
+            if (isStarred(lastLat, lastLng)) {
+                btn.classList.add('starred');
+                btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>已收藏';
+            } else {
+                btn.classList.remove('starred');
+                btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>收藏';
+            }
+        }
+
+        // ==== 地图初始化 ====
+        // 优先恢复用户上次位置；若没有则使用默认中心 [35, 105] zoom=4
+        var initialView = settings.lastView
+            ? [settings.lastView.lat, settings.lastView.lng]
+            : [35, 105];
+        var initialZoom = settings.lastView ? settings.lastView.zoom : 4;
+        var map = L.map('map', {
+            zoomControl: false, minZoom: 2, maxZoom: 20,
+            maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1.0,
+            // 惯性滑动：更顺滑的减速曲线
+            inertia: true, inertiaDeceleration: 2500, inertiaMaxSpeed: 2000,
+            // 缩放结束后再更新瓦片，避免拖动/缩放过程中反复重绘
+            updateWhenZooming: false,
+            updateWhenIdle: true,
+            // 平滑缩放
+            zoomAnimation: true,
+            fadeAnimation: true,
+            markerZoomAnimation: true,
+            // 细粒度缩放：0.25 步进让双指缩放更平滑
+            zoomSnap: 0.25,
+            zoomDelta: 0.5,
+            // 滚轮缩放防抖：更跟手
+            wheelDebounceTime: 20,
+            wheelPxPerZoomLevel: 60,
+            // 双击缩放保留，但禁用 shift-drag 框选（减少误触）
+            doubleClickZoom: true,
+            boxZoom: false,
+            // 触摸选项：双指旋转/缩放更灵敏
+            tap: true,
+            tapTolerance: 15,
+            touchZoom: true,
+            bounceAtZoomLimits: false,
+            // 拖动阈值：减少误拖
+            dragThreshold: 3
+        }).setView(initialView, initialZoom);
+
+        // 自定义 TileLayer：扩大 keepBuffer，屏幕外 3 圈瓦片都提前加载
+        // Leaflet 1.7+ 支持 keepBuffer 选项（默认 2），这里加大到 3 让拖动更顺滑
+        var layers = {
+            voyager: L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
+                maxZoom: 20, subdomains: ['a', 'b', 'c', 'd'], keepBuffer: 3
+            }),
+            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 18, keepBuffer: 3
+            }),
+            topo: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19, keepBuffer: 3
+            }),
+            dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', {
+                maxZoom: 20, subdomains: ['a', 'b', 'c', 'd'], keepBuffer: 3
+            }),
+            transit: L.tileLayer('https://{s}.tile.thunderforest.com/transport/{z}/{x}/{y}.png', {
+                maxZoom: 20, subdomains: ['a', 'b', 'c'], keepBuffer: 3
+            }),
+            bike: L.tileLayer('https://{s}.tile.thunderforest.com/cycle/{z}/{x}/{y}.png', {
+                maxZoom: 20, subdomains: ['a', 'b', 'c'], keepBuffer: 3
+            })
+        };
+        // 为每个图层优化瓦片加载行为：失败重试 + 浅色占位 + 多域名并发
+        Object.keys(layers).forEach(function(k) {
+            var lyr = layers[k];
+            // 加载失败时给出浅色占位，并自动重试（最多 3 次）
+            lyr.on('tileerror', function(e) {
+                var tile = e.tile;
+                if (!tile) return;
+                tile.style.background = '#e8eaed';
+                tile.style.opacity = '0.4';
+                // 智能重试：记录已重试次数，避免无限循环
+                var retries = parseInt(tile.dataset.retry || '0', 10);
+                if (retries < 3) {
+                    tile.dataset.retry = (retries + 1).toString();
+                    var src = tile.getAttribute('src');
+                    if (src) {
+                        // 错峰重试，避免瞬间并发冲击
+                        setTimeout(function() {
+                            // 移除已有的 _r= 缓存参数，避免重复追加导致 URL 越来越长
+                            var cleanSrc = src.replace(/([?&])_r=\d+[\d.]*&?/g, '$1').replace(/[?&]$/, '');
+                            var bust = (cleanSrc.indexOf('?') >= 0 ? '&' : '?') + '_r=' + Date.now() + Math.random();
+                            tile.setAttribute('src', cleanSrc + bust);
+                        }, 600 * (retries + 1) + Math.random() * 400);
+                    }
+                }
+            });
+            // 加载完成时清理占位背景
+            lyr.on('tileload', function(e) {
+                var tile = e.tile;
+                if (tile) {
+                    tile.style.background = '';
+                    tile.style.opacity = '';
+                }
+            });
+            // 跟踪加载进度（控制并发数：同时在飞的请求超过 30 时暂停）
+            // 这里通过 Leaflet 的内部队列已有限制，仅做监控
+        });
+        // 全局 HTTP 并发限制：通过覆盖 XMLHttpRequest / Image 并发数不可行，
+        // 但浏览器本身对每个 host 有 6 并发限制，subdomains 已能突破该限制
+        // （例如 4 个子域名 = 4*6 = 24 路并发）
+        console.log('[tiles] 多线程加载已启用：每个子域名最多 6 并发，4 子域名 = 24 路并发');
+
+        // 主动预加载屏幕外 4-6 圈的瓦片：监听移动/缩放结束后预热大范围瓦片
+        function preheatTiles(layer, extraRings) {
+            if (!layer || !map) return;
+            var z = map.getZoom();
+            if (z < 2 || z > 18) return;
+            var bounds = map.getBounds();
+            // 在原 bounds 基础上向外扩展 extraRings 圈
+            var dx = (bounds.getEast() - bounds.getWest()) * extraRings * 0.5;
+            var dy = (bounds.getNorth() - bounds.getSouth()) * extraRings * 0.5;
+            var expanded = L.latLngBounds(
+                [bounds.getSouth() - dy, bounds.getWest() - dx],
+                [bounds.getNorth() + dy, bounds.getEast() + dx]
+            );
+            // 复用 Leaflet 的 _addTilesFromCenterOut 内部方法（如果存在）
+            if (typeof layer._addTilesFromCenterOut === 'function') {
+                try {
+                    layer._addTilesFromCenterOut(expanded, z);
+                } catch (e) { /* ignore */ }
+            }
+        }
+        console.log('[tiles] 预加载已启用：屏幕外 keepBuffer=3 圈 + 主动预热 2 圈');
+        // 添加 _url 属性方便下载时获取模板
+        layers.voyager._url = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
+        layers.satellite._url = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+        layers.topo._url = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}';
+        layers.dark._url = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
+        layers.transit._url = 'https://{s}.tile.thunderforest.com/transport/{z}/{x}/{y}.png';
+        layers.bike._url = 'https://{s}.tile.thunderforest.com/cycle/{z}/{x}/{y}.png';
+        var layerNames = { voyager: '地图', satellite: '卫星', topo: '地形', dark: '暗色', transit: '交通', bike: '骑行' };
+        var curLayerName = settings.defaultLayer || 'voyager';
+        if (!layers[curLayerName]) curLayerName = 'voyager';
+        var curLayer = layers[curLayerName].addTo(map);
+
+        // 注册主动预热监听：移动/缩放结束后自动预热屏幕外 2 圈瓦片
+        // 同时保存当前视图到 localStorage，下次打开时恢复
+        var preheatTimer = null;
+        var saveViewTimer = null;
+        map.on('moveend zoomend', function() {
+            if (preheatTimer) clearTimeout(preheatTimer);
+            preheatTimer = setTimeout(function() {
+                preheatTiles(curLayer, 2);
+            }, 100);
+            // 防抖保存（移动停止 500ms 后再写入）
+            if (saveViewTimer) clearTimeout(saveViewTimer);
+            saveViewTimer = setTimeout(saveLastView, 500);
+        });
+
+        // 如果是恢复上次位置，首次加载时给出提示
+        if (settings.lastView) {
+            setTimeout(function() {
+                toast('已恢复上次位置 (' + settings.lastView.lat.toFixed(3) + ', ' + settings.lastView.lng.toFixed(3) + ')');
+            }, 800);
+        }
+
+        // ==== 图标 ====
+        var pinIcon = L.divIcon({
+            className: 'pin-marker', iconSize: [30, 42], iconAnchor: [15, 42],
+            html: '<svg viewBox="0 0 30 42"><path d="M15 0C7.6 0 1.5 6.1 1.5 13.5c0 10.5 13.5 28.5 13.5 28.5s13.5-18 13.5-28.5C28.5 6.1 22.4 0 15 0z" fill="#ea4335"/><circle cx="15" cy="14" r="6" fill="#fff"/></svg>'
+        });
+        var locIcon = L.divIcon({
+            className: '', html: '<div class="loc-dot"></div>',
+            iconSize: [18, 18], iconAnchor: [9, 9]
+        });
+
+        var curMarker = null, locMarker = null, locCircle = null, routeLine = null;
+        var lastLat = null, lastLng = null, lastSub = '', userLat = null, userLng = null;
+
+        // ==== 剪贴板工具 ====
+        function copyText(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(text);
+            }
+            // 降级方案：使用 textarea
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch(e) {}
+            document.body.removeChild(ta);
+            return Promise.resolve();
+        }
+
+        // ==== 搜索 ====
+        var searchInput = document.getElementById('search-input');
+        var sClear = document.getElementById('s-clear');
+        var resultsArea = document.getElementById('results-area');
+        var resultsBox = document.getElementById('search-results');
+        var sTimer = null;
+        var searchCtrl = null;
+        var activeQuery = null;
+
+        searchInput.addEventListener('input', function() {
+            var v = this.value.trim();
+            sClear.classList.toggle('show', v.length > 0);
+            if (sTimer) clearTimeout(sTimer);
+            if (!v) { resultsArea.style.display = 'none'; return; }
+            // 取消之前的请求
+            if (searchCtrl) { searchCtrl.abort(); }
+            sTimer = setTimeout(function() { doSearch(v); }, 300);
+        });
+        searchInput.addEventListener('focus', function() {
+            if (this.value.trim()) doSearch(this.value.trim());
+        });
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (sTimer) { clearTimeout(sTimer); sTimer = null; } // 清除 input 防抖，避免覆盖 Enter 搜索
+                var v = this.value.trim();
+                if (v) doSearch(v, true);
+            }
+        });
+        sClear.addEventListener('click', function() {
+            searchInput.value = '';
+            sClear.classList.remove('show');
+            resultsArea.style.display = 'none';
+            if (searchCtrl) searchCtrl.abort();
+            searchInput.focus();
+        });
+
+        // ==== 语音（优先 Web Speech API，降级 MediaRecorder + 后端 ASR） ====
+        var micBtn = document.getElementById('mic-btn');
+        var mediaRec = null;
+        var mediaStream = null;
+        var recChunks = [];
+        var isRecording = false;
+        var recStartTime = 0;
+        var recTimer = null;
+        var webSpeechRec = null; // Web Speech API 实例
+        var useWebSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+        function setMicState(on) {
+            isRecording = on;
+            if (on) micBtn.classList.add('active');
+            else micBtn.classList.remove('active');
+        }
+
+        function pickMimeType() {
+            var types = [
+                'audio/webm;codecs=opus',
+                'audio/webm',
+                'audio/ogg;codecs=opus',
+                'audio/mp4'
+            ];
+            for (var i = 0; i < types.length; i++) {
+                if (window.MediaRecorder && MediaRecorder.isTypeSupported(types[i])) return types[i];
+            }
+            return '';
+        }
+
+        function updateRecDuration() {
+            if (!isRecording) return;
+            var sec = Math.floor((Date.now() - recStartTime) / 1000);
+            var mm = String(Math.floor(sec / 60)).padStart(2, '0');
+            var ss = String(sec % 60).padStart(2, '0');
+            toast('录音中 ' + mm + ':' + ss);
+        }
+
+        // ---- Web Speech API 方式（浏览器原生，无需后端） ----
+        function startWebSpeech() {
+            var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) return false;
+            webSpeechRec = new SR();
+            webSpeechRec.lang = window.APP_LANG || 'zh-CN';
+            webSpeechRec.continuous = false;
+            webSpeechRec.interimResults = true;
+            var finalText = '';
+            webSpeechRec.onstart = function() {
+                setMicState(true);
+                toast('正在聆听…请说话');
+            };
+            webSpeechRec.onresult = function(e) {
+                var interim = '';
+                for (var i = e.resultIndex; i < e.results.length; i++) {
+                    if (e.results[i].isFinal) {
+                        finalText += e.results[i][0].transcript;
+                    } else {
+                        interim += e.results[i][0].transcript;
+                    }
+                }
+                if (interim) toast('识别中：' + interim);
+            };
+            webSpeechRec.onerror = function(e) {
+                console.error('[mic] Web Speech error', e.error);
+                setMicState(false);
+                if (e.error === 'not-allowed') toast('麦克风权限被拒绝');
+                else if (e.error === 'no-speech') toast('未检测到语音，请重试');
+                else toast('语音识别出错: ' + e.error);
+            };
+            webSpeechRec.onend = function() {
+                setMicState(false);
+                finalText = finalText.trim();
+                if (finalText) {
+                    console.log('[mic] Web Speech 结果:', finalText);
+                    searchInput.value = finalText;
+                    sClear.classList.add('show');
+                    doSearch(finalText, true);
+                } else {
+                    toast('未识别到语音内容');
+                }
+            };
+            try {
+                webSpeechRec.start();
+                return true;
+            } catch (e) {
+                console.error('[mic] Web Speech start failed', e);
+                return false;
+            }
+        }
+
+        function stopWebSpeech() {
+            if (webSpeechRec) {
+                try { webSpeechRec.stop(); } catch (e) {}
+            }
+        }
+
+        // ---- MediaRecorder 方式（降级，需要后端 ASR） ----
+        function startRecording() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                toast('浏览器不支持录音');
+                return;
+            }
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(function(stream) {
+                    mediaStream = stream;
+                    var mimeType = pickMimeType();
+                    try {
+                        mediaRec = mimeType ? new MediaRecorder(stream, { mimeType: mimeType })
+                                            : new MediaRecorder(stream);
+                    } catch (e) {
+                        mediaRec = new MediaRecorder(stream);
+                    }
+                    recChunks = [];
+                    mediaRec.ondataavailable = function(e) {
+                        if (e.data && e.data.size > 0) recChunks.push(e.data);
+                    };
+                    mediaRec.onstop = function() {
+                        // 停止所有音轨
+                        try { stream.getTracks().forEach(function(t) { t.stop(); }); } catch (ex) {}
+                        mediaStream = null;
+                        // 拼装 Blob
+                        var blob = new Blob(recChunks, { type: mediaRec.mimeType || 'audio/webm' });
+                        console.log('[mic] 录音完成', blob.size, 'bytes', mediaRec.mimeType);
+                        recChunks = [];
+                        if (blob.size < 1000) {
+                            toast('录音太短，请重试');
+                            return;
+                        }
+                        uploadForASR(blob);
+                    };
+                    mediaRec.onerror = function(e) {
+                        console.error('[mic] MediaRecorder error', e);
+                        toast('录音出错: ' + (e.error && e.error.name || '未知'));
+                        stopRecording();
+                    };
+                    mediaRec.start(250); // 每 250ms 产生一个 chunk
+                    recStartTime = Date.now();
+                    setMicState(true);
+                    toast('开始录音…');
+                    if (recTimer) clearInterval(recTimer);
+                    recTimer = setInterval(updateRecDuration, 1000);
+                })
+                .catch(function(err) {
+                    console.error('[mic] getUserMedia failed', err);
+                    if (err.name === 'NotAllowedError') toast('麦克风权限被拒绝');
+                    else if (err.name === 'NotFoundError') toast('未找到麦克风设备');
+                    else toast('无法访问麦克风: ' + err.name);
+                });
+        }
+
+        function stopRecording() {
+            if (recTimer) { clearInterval(recTimer); recTimer = null; }
+            if (mediaRec && mediaRec.state !== 'inactive') {
+                try { mediaRec.stop(); } catch (ex) { console.error(ex); }
+            }
+            if (mediaStream) {
+                try { mediaStream.getTracks().forEach(function(t) { t.stop(); }); } catch (ex) {}
+                mediaStream = null;
+            }
+            setMicState(false);
+        }
+
+        function uploadForASR(blob) {
+            toast('正在识别…');
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', 'http://localhost:8080/api/asr', true);
+            xhr.timeout = 60000;
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    try {
+                        var resp = JSON.parse(xhr.responseText);
+                        var text = (resp.text || '').trim();
+                        console.log('[mic] ASR 识别结果', JSON.stringify(text), '耗时', (resp.time || 0) + 's');
+                        if (text) {
+                            searchInput.value = text;
+                            sClear.classList.add('show');
+                            doSearch(text, true);
+                        } else {
+                            toast('未识别到语音内容，请重试');
+                        }
+                    } catch (e) {
+                        console.error('[mic] parse error', e);
+                        toast('识别结果解析失败');
+                    }
+                } else {
+                    console.error('[mic] ASR HTTP', xhr.status, xhr.responseText);
+                    toast('识别服务异常: HTTP ' + xhr.status);
+                }
+            };
+            xhr.onerror = function() {
+                console.error('[mic] upload network error');
+                toast('识别服务连接失败，请确认本地 ASR 服务已启动');
+            };
+            xhr.ontimeout = function() {
+                toast('识别超时，请重试');
+            };
+            var ct = blob.type || 'audio/webm';
+            xhr.setRequestHeader('Content-Type', ct);
+            xhr.send(blob);
+        }
+
+        var audioFileInput = document.getElementById('audio-file-input');
+
+        // 右键点击麦克风按钮时触发文件选择
+        micBtn.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('[mic] 右键点击，打开文件选择');
+            audioFileInput.click();
+        });
+
+        // 文件选择后上传进行语音识别
+        audioFileInput.addEventListener('change', function(e) {
+            var file = e.target.files[0];
+            if (!file) return;
+            console.log('[mic] 选择文件', file.name, file.size, 'bytes', file.type);
+            if (file.size > 10 * 1024 * 1024) {
+                toast('文件太大，请选择10MB以内的音频文件');
+                return;
+            }
+            uploadForASR(file);
+            // 清空input以便下次可以选择同一文件
+            audioFileInput.value = '';
+        });
+
+        micBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('[mic] click, isRecording=' + isRecording + ', useWebSpeech=' + useWebSpeech);
+            if (isRecording) {
+                // 停止录音
+                if (useWebSpeech && webSpeechRec) {
+                    stopWebSpeech();
+                } else {
+                    stopRecording();
+                }
+            } else {
+                // 开始录音：优先 Web Speech API
+                if (useWebSpeech) {
+                    if (!startWebSpeech()) {
+                        // Web Speech 启动失败，降级到 MediaRecorder
+                        startRecording();
+                    }
+                } else {
+                    startRecording();
+                }
+            }
+        });
+
+        function doSearch(q, gotoFirst) {
+            // 坐标直接跳转
+            var cm = q.match(/^(-?\d+\.?\d*)\s*[,，\s]\s*(-?\d+\.?\d*)$/);
+            if (cm) {
+                var la = parseFloat(cm[1]), ln = parseFloat(cm[2]);
+                if (la >= -90 && la <= 90 && ln >= -180 && ln <= 180) {
+                    goTo(la, ln, '坐标 ' + la.toFixed(4) + ', ' + ln.toFixed(4));
+                    resultsArea.style.display = 'none';
+                    return;
+                }
+            }
+            resultsBox.innerHTML = '<div class="search-loading"><span class="spin"></span>正在搜索...</div>';
+            resultsArea.style.display = 'block';
+
+            activeQuery = q;
+            // 取消之前的请求
+            if (searchCtrl) searchCtrl.abort();
+            searchCtrl = new AbortController();
+            trySearchApis(q, gotoFirst, 0, searchCtrl.signal);
+        }
+
+        // 检测是否为中文查询
+        function isChineseQuery(q) {
+            return /[\u4e00-\u9fff]/.test(q);
+        }
+
+        // Photon API 转换
+        function transformPhoton(data) {
+            return (data.features || []).map(function(f) {
+                var p = f.properties || {};
+                var coords = f.geometry.coordinates || [0, 0];
+                var parts = [p.name];
+                if (p.city && p.city !== p.name) parts.push(p.city);
+                if (p.state && p.state !== p.city) parts.push(p.state);
+                if (p.country) parts.push(p.country);
+                return {
+                    lat: coords[1],
+                    lng: coords[0],
+                    name: p.name || '',
+                    sub: parts.join(', ')
+                };
+            });
+        }
+
+        // Nominatim API 转换
+        function transformNominatim(data) {
+            return data.map(function(r) {
+                return {
+                    lat: parseFloat(r.lat),
+                    lng: parseFloat(r.lon),
+                    name: (r.display_name || '').split(',')[0],
+                    sub: r.display_name || ''
+                };
+            });
+        }
+
+        // Open-Meteo API 转换
+        function transformOpenMeteo(data) {
+            return (data.results || []).map(function(r) {
+                var parts = [r.name];
+                if (r.admin1 && r.admin1 !== r.name) parts.push(r.admin1);
+                if (r.country) parts.push(r.country);
+                return {
+                    lat: r.latitude,
+                    lng: r.longitude,
+                    name: r.name || '',
+                    sub: parts.join(', ')
+                };
+            });
+        }
+
+        var searchApis = [
+            // Photon API (CDN)
+            function(q, signal) {
+                var url = 'https://photon.komoot.io/api/?q=' + encodeURIComponent(q) + '&limit=8';
+                return fetch(url, { signal: signal })
+                    .then(function(r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
+                    .then(transformPhoton);
+            },
+            // Nominatim API (CDN)
+            function(q, signal) {
+                var url = 'https://nominatim.openstreetmap.org/search?format=json&q=' + 
+                    encodeURIComponent(q) + '&limit=8&accept-language=' + encodeURIComponent(window.APP_LANG || 'zh-CN') + '&addressdetails=1';
+                return fetch(url, { 
+                    signal: signal,
+                    headers: { 'User-Agent': 'MapApp/1.0' }
+                })
+                    .then(function(r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
+                    .then(transformNominatim);
+            },
+            // Open-Meteo API (CDN)
+            function(q, signal) {
+                var url = 'https://geocoding-api.open-meteo.com/v1/search?name=' + 
+                    encodeURIComponent(q) + '&count=8&language=' + encodeURIComponent(window.APP_LANG_SHORT || 'zh') + '&format=json';
+                return fetch(url, { signal: signal })
+                    .then(function(r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
+                    .then(transformOpenMeteo);
+            },
+            // 后端 API (降级方案)
+            function(q, signal) {
+                var url = 'http://localhost:8080/api/search?q=' + encodeURIComponent(q) + '&limit=8';
+                return fetch(url, { signal: signal })
+                    .then(function(r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
+                    .then(function(data) {
+                        if (!data || !data.results || !data.results.length) return [];
+                        return data.results.map(function(r) {
+                            return {
+                                lat: r.lat,
+                                lng: r.lon,
+                                name: r.name || r.display_name.split(',')[0],
+                                sub: r.display_name || ''
+                            };
+                        });
+                    });
+            }
+        ];
+
+        function trySearchApis(q, gotoFirst, idx, signal) {
+            if (q !== activeQuery) return;
+            if (idx >= searchApis.length) {
+                resultsBox.innerHTML = '<div class="search-loading">未找到"' + esc(q) + '"相关结果<br>请尝试其他关键词</div>';
+                return;
+            }
+            // 每个API最多等待8秒
+            var timeoutId = setTimeout(function() {
+                if (q === activeQuery) {
+                    trySearchApis(q, gotoFirst, idx + 1, signal);
+                }
+            }, 8000);
+
+            searchApis[idx](q, signal).then(function(results) {
+                clearTimeout(timeoutId);
+                if (q !== activeQuery) return;
+                if (results && results.length) {
+                    renderResults(results, gotoFirst);
+                } else {
+                    trySearchApis(q, gotoFirst, idx + 1, signal);
+                }
+            }).catch(function(err) {
+                clearTimeout(timeoutId);
+                if (err && err.name === 'AbortError') return;
+                if (q !== activeQuery) return;
+                trySearchApis(q, gotoFirst, idx + 1, signal);
+            });
+        }
+        function renderResults(items, gotoFirst) {
+            if (gotoFirst && items.length) {
+                var f = items[0];
+                goTo(parseFloat(f.lat), parseFloat(f.lng), f.name, f.sub);
+                resultsArea.style.display = 'none';
+                return;
+            }
+            resultsBox.innerHTML = '';
+            items.forEach(function(r) {
+                var div = document.createElement('div');
+                div.className = 'search-result';
+                div.dataset.lat = String(r.lat);
+                div.dataset.lng = String(r.lng);
+                div.innerHTML =
+                    '<div class="result-icon place"><svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg></div>' +
+                    '<div class="result-text"><div class="result-title"></div><div class="result-sub"></div></div>';
+                div.querySelector('.result-title').textContent = r.name;
+                div.querySelector('.result-sub').textContent = r.sub || '';
+                resultsBox.appendChild(div);
+            });
+            resultsBox.querySelectorAll('.search-result').forEach(function(item) {
+                item.addEventListener('click', function() {
+                    var la = parseFloat(this.dataset.lat), ln = parseFloat(this.dataset.lng);
+                    var title = this.querySelector('.result-title').textContent;
+                    goTo(la, ln, title, this.querySelector('.result-sub').textContent);
+                    resultsArea.style.display = 'none';
+                    searchInput.value = title;
+                    sClear.classList.add('show');
+                    searchInput.blur();
+                });
+            });
+        }
+
+        function goTo(la, ln, nm, sub) {
+            map.flyTo([la, ln], Math.min(15, curLayer.options.maxZoom || 20), { duration: 1.2 });
+            setTimeout(function() { setPin(la, ln, nm, sub); }, 300);
+        }
+        function setPin(la, ln, nm, sub) {
+            if (curMarker) map.removeLayer(curMarker);
+            lastLat = la; lastLng = ln; lastSub = sub || '';
+            curMarker = L.marker([la, ln], { icon: pinIcon }).addTo(map);
+            showSheet(nm || '标记点', sub || '经度 ' + ln.toFixed(5) + '，纬度 ' + la.toFixed(5), la, ln);
+        }
+
+        // 地图点击
+        map.on('click', function(e) {
+            setPin(e.latlng.lat, e.latlng.lng, '标记点', '经度 ' + e.latlng.lng.toFixed(5) + '，纬度 ' + e.latlng.lat.toFixed(5));
+        });
+
+        // ==== 底部卡片 ====
+        function showSheet(title, sub, la, ln) {
+            document.getElementById('place-title').textContent = title;
+            document.getElementById('place-sub').textContent = sub;
+            document.getElementById('place-coord').textContent = fmtCoord(la, ln);
+            var sheet = document.getElementById('bottom-sheet');
+            sheet.classList.add('show');
+            sheet.classList.remove('fullscreen', 'half');
+            sheet.style.transform = '';
+            // 重置照片加载状态
+            sheetPhotosLoaded = false;
+            document.getElementById('sheet-photos').style.display = 'none';
+            updateStarBtn();
+        }
+        document.getElementById('sheet-close').addEventListener('click', function() {
+            var sheet = document.getElementById('bottom-sheet');
+            sheet.classList.remove('show', 'fullscreen', 'half');
+            sheet.style.transform = '';
+        });
+        // 拖动把手：跟手拖动 + 三档吸附（收起/半屏/全屏）
+        (function() {
+            var sheet = document.getElementById('bottom-sheet');
+            var handle = sheet.querySelector('.sheet-handle');
+            var startY = 0, isDragging = false, currentTranslate = 0;
+            var sheetHeight = 0; // 面板完整高度
+            var SNAP_THRESHOLD = 80; // 超过此距离切换档位
+
+            function getSheetHeight() {
+                return sheet.scrollHeight;
+            }
+
+            function onStart(e) {
+                if (e.button !== undefined && e.button !== 0) return; // 仅左键
+                e.preventDefault();
+                isDragging = true;
+                startY = (e.touches ? e.touches[0] : e).clientY;
+                sheetHeight = getSheetHeight();
+                sheet.classList.add('dragging');
+                sheet.style.transition = 'none';
+                // 记录当前 transform 偏移
+                var matrix = new DOMMatrix(getComputedStyle(sheet).transform);
+                currentTranslate = matrix.m42; // translateY 值
+            }
+
+            function onMove(e) {
+                if (!isDragging) return;
+                e.preventDefault();
+                var y = (e.touches ? e.touches[0] : e).clientY;
+                var diff = y - startY;
+                var newTranslate = currentTranslate + diff;
+                // 限制范围：不能向下拖出屏幕（translateY > 0），不能向上超过面板高度
+                if (newTranslate > 0) newTranslate = 0;
+                // 上拉到全屏后加阻尼
+                var maxUpPull = 0;
+                if (sheet.classList.contains('fullscreen')) {
+                    maxUpPull = 0; // 全屏时不能再上拉
+                } else {
+                    maxUpPull = -(sheetHeight - 80); // 最多拉到只剩把手
+                }
+                if (newTranslate < maxUpPull) {
+                    newTranslate = maxUpPull;
+                }
+                sheet.style.transform = 'translateY(' + newTranslate + 'px)';
+            }
+
+            function onEnd(e) {
+                if (!isDragging) return;
+                isDragging = false;
+                sheet.classList.remove('dragging');
+                sheet.style.transition = '';
+                sheet.style.transform = '';
+
+                var y = (e.changedTouches ? e.changedTouches[0] : e).clientY;
+                var diff = y - startY;
+                var isFullscreen = sheet.classList.contains('fullscreen');
+                var isHalf = sheet.classList.contains('half');
+
+                if (diff < -SNAP_THRESHOLD) {
+                    // 上滑 → 升级档位
+                    if (!isFullscreen && !isHalf) {
+                        sheet.classList.add('half');
+                    } else if (isHalf) {
+                        sheet.classList.remove('half');
+                        sheet.classList.add('fullscreen');
+                        loadSheetPhotos();
+                    }
+                } else if (diff > SNAP_THRESHOLD) {
+                    // 下滑 → 降级档位
+                    if (isFullscreen) {
+                        sheet.classList.remove('fullscreen');
+                        sheet.classList.add('half');
+                    } else if (isHalf) {
+                        sheet.classList.remove('half');
+                    } else {
+                        sheet.classList.remove('show');
+                    }
+                }
+            }
+
+            handle.addEventListener('mousedown', onStart);
+            handle.addEventListener('touchstart', onStart, { passive: false });
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('touchmove', onMove, { passive: false });
+            document.addEventListener('mouseup', onEnd);
+            document.addEventListener('touchend', onEnd);
+            document.addEventListener('touchcancel', onEnd);
+
+            handle.addEventListener('dblclick', function() {
+                if (sheet.classList.contains('fullscreen')) {
+                    sheet.classList.remove('fullscreen', 'half');
+                } else {
+                    sheet.classList.remove('half');
+                    sheet.classList.add('fullscreen');
+                    loadSheetPhotos();
+                }
+            });
+        })();
+
+        // 全屏时加载附近照片
+        var sheetPhotosLoaded = false;
+        function loadSheetPhotos() {
+            if (sheetPhotosLoaded) return;
+            if (!lastLat || !lastLng) return;
+            sheetPhotosLoaded = true;
+            var container = document.getElementById('sheet-photos');
+            var grid = document.getElementById('sheet-photos-grid');
+            container.style.display = 'block';
+            grid.innerHTML = '<div class="sheet-photos-empty">正在搜索附近照片…</div>';
+            fetch('http://localhost:8080/api/wikimedia?lat=' + encodeURIComponent(lastLat) + '&lon=' + encodeURIComponent(lastLng) + '&radius=10000')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var photos = (data && data.photos) ? data.photos.filter(function(p) { return p.thumb; }) : [];
+                    if (!photos.length) {
+                        grid.innerHTML = '<div class="sheet-photos-empty">附近暂无照片</div>';
+                        return;
+                    }
+                    grid.innerHTML = '';
+                    photos.forEach(function(p) {
+                        var card = document.createElement('div');
+                        card.className = 'sheet-photo-card';
+                        var img = document.createElement('img');
+                        img.src = safeImgUrl(p.thumb);
+                        img.alt = p.name || '';
+                        img.loading = 'lazy';
+                        var dist = document.createElement('div');
+                        dist.className = 'spc-dist';
+                        dist.textContent = p.dist < 1000 ? Math.round(p.dist) + ' m' : (p.dist / 1000).toFixed(1) + ' km';
+                        card.appendChild(img);
+                        card.appendChild(dist);
+                        grid.appendChild(card);
+                    });
+                })
+                .catch(function() {
+                    grid.innerHTML = '<div class="sheet-photos-empty">照片加载失败</div>';
+                });
+        }
+
+        // 卡片按钮
+        document.getElementById('btn-route-to').addEventListener('click', openRouteWithPin);
+        document.getElementById('btn-star').addEventListener('click', function() {
+            if (lastLat) toggleStar(lastLat, lastLng, document.getElementById('place-title').textContent, lastSub);
+        });
+        document.getElementById('btn-street-view').addEventListener('click', function() {
+            var la = lastLat || map.getCenter().lat, ln = lastLng || map.getCenter().lng;
+            openStreetView(la, ln);
+        });
+        document.getElementById('btn-copy-coord').addEventListener('click', function() {
+            if (!lastLat) return;
+            copyText(lastLat.toFixed(6) + ', ' + lastLng.toFixed(6))
+                .then(function() { toast('坐标已复制'); });
+        });
+        document.getElementById('btn-share').addEventListener('click', function() {
+            if (!lastLat) return;
+            var url = 'https://maps.google.com/?q=' + lastLat + ',' + lastLng;
+            copyText(url).then(function() { toast('链接已复制'); });
+        });
+
+        // ==== 侧面板 ====
+        var sidePanel = document.getElementById('side-panel');
+        var panelOverlay = document.getElementById('panel-overlay');
+        document.getElementById('menu-btn').addEventListener('click', function() {
+            sidePanel.classList.add('open');
+            panelOverlay.classList.add('show');
+        });
+        document.getElementById('places-back').addEventListener('click', function() {
+            document.getElementById('places-panel').style.display = 'none';
+        });
+        document.getElementById('about-back').addEventListener('click', function() {
+            document.getElementById('about-panel').style.display = 'none';
+        });
+        panelOverlay.addEventListener('click', closePanel);
+        function closePanel() {
+            sidePanel.classList.remove('open');
+            panelOverlay.classList.remove('show');
+        }
+        document.querySelectorAll('.side-item').forEach(function(item) {
+            item.addEventListener('click', function() {
+                var action = this.dataset.action;
+                closePanel();
+                switch(action) {
+                    case 'route': openRoutePanel(); break;
+                    case 'places': showPlacesPanel(); break;
+                    case 'explore': exploreNearby(); break;
+                    case 'layer-switch': toggleLayerPanel(); break;
+                    case 'street-view':
+                        if (!lastLat) { toast('请先在地图上选择一个地点'); return; }
+                        openStreetView(lastLat, lastLng);
+                        break;
+                    case 'share-link': shareMapLink(); break;
+                    case 'unit-switch':
+                        settings.unit = settings.unit === 'km' ? 'mi' : 'km';
+                        saveSettings();
+                        document.getElementById('unit-badge').textContent = settings.unit === 'km' ? '公里' : '英里';
+                        toast('距离单位：' + (settings.unit === 'km' ? '公里' : '英里'));
+                        break;
+                    case 'download-tiles': openTileDownloadPanel(); break;
+                    case 'about': document.getElementById('about-panel').style.display = 'block'; break;
+                }
+            });
+        });
+
+        function showPlacesPanel() {
+            var list = document.getElementById('places-list');
+            if (!savedPlaces.length) {
+                list.innerHTML = '<div class="search-loading">还没有收藏的地点<br>点击地图后选择"收藏"保存</div>';
+            } else {
+                list.innerHTML = savedPlaces.map(function(p, i) {
+                    return '<div class="search-result" data-idx="' + i + '">' +
+                        '<div class="result-icon place"><svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></div>' +
+                        '<div class="result-text"><div class="result-title">' + esc(p.name) + '</div><div class="result-sub">' + esc(p.sub || fmtCoord(p.lat, p.lng)) + '</div></div></div>';
+                }).join('');
+                list.querySelectorAll('.search-result').forEach(function(r) {
+                    r.addEventListener('click', function() {
+                        var p = savedPlaces[parseInt(this.dataset.idx)];
+                        if (p) goTo(p.lat, p.lng, p.name, p.sub);
+                        document.getElementById('places-panel').style.display = 'none';
+                    });
+                });
+            }
+            document.getElementById('places-panel').style.display = 'block';
+        }
+
+        function exploreNearby() {
+            var c = map.getCenter();
+            toast('搜索附近地标...');
+            resultsArea.style.display = 'block';
+            resultsBox.innerHTML = '<div class="search-loading"><span class="spin"></span>搜索附近...</div>';
+            fetch('http://localhost:8080/api/overpass?lat=' + c.lat + '&lon=' + c.lng + '&radius=5000')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.elements || !data.elements.length) {
+                        resultsBox.innerHTML = '<div class="search-loading">附近没有地标</div>';
+                        return;
+                    }
+                    renderResults(data.elements.slice(0, 10).map(function(e) {
+                        var n = (e.tags && (e.tags.name || e.tags['name:zh'])) || '未命名地点';
+                        var s = (e.tags && (e.tags.tourism || e.tags.historic)) || '';
+                        return { lat: e.lat, lng: e.lon, name: n, sub: s };
+                    }));
+                })
+                .catch(function() {
+                    resultsBox.innerHTML = '<div class="search-loading">搜索失败</div>';
+                });
+        }
+
+        function shareMapLink() {
+            var c = map.getCenter();
+            var url = 'https://maps.google.com/?q=' + c.lat + ',' + c.lng;
+            copyText(url).then(function() { toast('链接已复制'); });
+        }
+
+        // ==== 图层切换 ====
+        function toggleLayerPanel() {
+            var p = document.getElementById('layer-panel');
+            p.classList.toggle('show');
+        }
+        document.getElementById('btn-layer').addEventListener('click', function(e) {
+            e.stopPropagation();
+            toggleLayerPanel();
+        });
+        document.querySelectorAll('.layer-tile').forEach(function(tile) {
+            tile.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var name = this.dataset.layer;
+                if (name === curLayerName) return;
+                map.removeLayer(curLayer);
+                layers[name].addTo(map);
+                curLayer = layers[name];
+                curLayerName = name;
+                settings.defaultLayer = name;
+                saveSettings();
+                document.querySelectorAll('.layer-tile').forEach(function(t) { t.classList.remove('active'); });
+                this.classList.add('active');
+                document.getElementById('layer-panel').classList.remove('show');
+                toast('已切换到' + layerNames[name]);
+            });
+        });
+
+        // ==== 右侧按钮 ====
+        document.getElementById('btn-directions').addEventListener('click', openRoutePanel);
+        document.getElementById('btn-street').addEventListener('click', function() {
+            if (!lastLat) { toast('请先在地图上选择一个地点'); return; }
+            openStreetView(lastLat, lastLng);
+        });
+
+        // ==== 缩放 ====
+        document.getElementById('z-in').addEventListener('click', function() { map.zoomIn(); });
+        document.getElementById('z-out').addEventListener('click', function() { map.zoomOut(); });
+
+        // ==== 定位 ====
+        var locateBtn = document.getElementById('btn-locate');
+        locateBtn.addEventListener('click', function() {
+            if (!navigator.geolocation) { toast('浏览器不支持定位'); return; }
+            locateBtn.classList.add('active');
+            toast('正在获取位置...');
+            navigator.geolocation.getCurrentPosition(
+                function(pos) {
+                    var la = pos.coords.latitude, ln = pos.coords.longitude, ac = pos.coords.accuracy;
+                    userLat = la; userLng = ln;
+                    map.flyTo([la, ln], Math.min(16, curLayer.options.maxZoom || 20), { duration: 1.0 });
+                    if (locMarker) map.removeLayer(locMarker);
+                    if (locCircle) map.removeLayer(locCircle);
+                    locCircle = L.circle([la, ln], { radius: ac, fillColor: '#1a73e8', fillOpacity: 0.08, color: '#1a73e8', weight: 1, opacity: 0.4 }).addTo(map);
+                    locMarker = L.marker([la, ln], { icon: locIcon, zIndexOffset: 1000, interactive: false }).addTo(map);
+                    lastLat = la; lastLng = ln;
+                    toast('已定位到当前位置');
+                    locateBtn.classList.remove('active');
+                },
+                function() { toast('无法获取位置（权限被拒）'); locateBtn.classList.remove('active'); },
+                { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+            );
+        });
+
+        // ==== 可拖动定位按钮 ====
+        (function() {
+            var wrap = document.getElementById('locate-wrap');
+            var btn = locateBtn;
+            var dragging = false, startX, startY, startLeft, startTop, moved = false;
+
+            function onStart(e) {
+                // 只响应左键 / 单指触摸
+                if (e.button !== undefined && e.button !== 0) return;
+                if (e.touches && e.touches.length > 1) return;
+                dragging = true; moved = false;
+                var ev = e.touches ? e.touches[0] : e;
+                var rect = wrap.getBoundingClientRect();
+                startX = ev.clientX; startY = ev.clientY;
+                startLeft = rect.left; startTop = rect.top;
+                // 确保 position 使用 left/top 而非 right/bottom
+                wrap.style.left = startLeft + 'px';
+                wrap.style.top = startTop + 'px';
+                wrap.style.right = 'auto';
+                wrap.style.bottom = 'auto';
+                btn.classList.add('dragging');
+                // 不在 mousedown/touchstart 上 preventDefault，否则会阻止 click 事件
+            }
+            function onMove(e) {
+                if (!dragging) return;
+                var ev = e.touches ? e.touches[0] : e;
+                var dx = ev.clientX - startX, dy = ev.clientY - startY;
+                if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+                if (moved) {
+                    wrap.style.left = Math.max(4, Math.min(window.innerWidth - 56, startLeft + dx)) + 'px';
+                    wrap.style.top = Math.max(4, Math.min(window.innerHeight - 56, startTop + dy)) + 'px';
+                    e.preventDefault(); // 移动时才阻止滚动/选择
+                }
+            }
+            function onEnd(e) {
+                if (!dragging) return;
+                dragging = false;
+                btn.classList.remove('dragging');
+            }
+            btn.addEventListener('mousedown', onStart);
+            btn.addEventListener('touchstart', onStart, { passive: true });
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('touchmove', onMove, { passive: false });
+            document.addEventListener('mouseup', onEnd);
+            document.addEventListener('touchend', onEnd);
+            // 通过 moved 标志在 click 中判断：只在没有拖动时才让 click 冒泡到定位逻辑
+            btn.addEventListener('click', function(e) {
+                if (moved) { e.stopPropagation(); e.preventDefault(); }
+            }, true);
+        })();
+
+        // ==== 路线面板 ====
+        var routeMode = 'driving';
+        var routeFrom = null, routeTo = null;
+        var routePanel = document.getElementById('route-panel');
+
+        document.querySelectorAll('.route-mode-tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.route-mode-tab').forEach(function(t) { t.classList.remove('active'); });
+                this.classList.add('active');
+                routeMode = this.dataset.mode;
+            });
+        });
+        document.getElementById('route-back').addEventListener('click', function() {
+            routePanel.style.display = 'none';
+            document.getElementById('route-nav-row').style.display = 'none';
+            if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+        });
+        document.getElementById('route-use-loc').addEventListener('click', function() {
+            if (userLat) { document.getElementById('route-from').value = '当前位置'; routeFrom = { lat: userLat, lng: userLng }; }
+            else { toast('请先定位'); }
+        });
+        document.getElementById('route-swap').addEventListener('click', function() {
+            var tmp = routeFrom; routeFrom = routeTo; routeTo = tmp;
+            var fi = document.getElementById('route-from'), ti = document.getElementById('route-to');
+            var tv = fi.value; fi.value = ti.value; ti.value = tv;
+        });
+        document.getElementById('route-go').addEventListener('click', queryRoute);
+
+        function openRoutePanel() {
+            closePanel();
+            if (lastLat) { document.getElementById('route-to').value = document.getElementById('place-title').textContent; routeTo = { lat: lastLat, lng: lastLng }; }
+            if (userLat) { document.getElementById('route-from').value = '当前位置'; routeFrom = { lat: userLat, lng: userLng }; }
+            routePanel.style.display = 'block';
+        }
+        function openRouteWithPin() {
+            if (!lastLat) { toast('请先选择一个位置'); return; }
+            document.getElementById('route-to').value = document.getElementById('place-title').textContent;
+            routeTo = { lat: lastLat, lng: lastLng };
+            if (userLat) { document.getElementById('route-from').value = '当前位置'; routeFrom = { lat: userLat, lng: userLng }; }
+            routePanel.style.display = 'block';
+            queryRoute();
+        }
+
+        // 路线输入框回车键（反查坐标）
+        ['route-from', 'route-to'].forEach(function(id) {
+            document.getElementById(id).addEventListener('keydown', function(e) {
+                if (e.key !== 'Enter') return;
+                var q = this.value.trim();
+                if (!q) return;
+                var self = this;
+                geocode(q).then(function(result) {
+                    if (result) {
+                        self.value = result.name || q;
+                        if (id === 'route-from') routeFrom = result; else routeTo = result;
+                    } else toast('未找到该地点');
+                });
+            });
+            // 输入框内容变化时清除已保存的坐标，强制重新查询
+            document.getElementById(id).addEventListener('input', function() {
+                if (id === 'route-from') routeFrom = null; else routeTo = null;
+            });
+        });
+
+        // 地理编码：将文字转为坐标（使用后端 API）
+        function geocode(q) {
+            return new Promise(function(resolve) {
+                var done = false;
+                function finish(res) {
+                    if (!done) { done = true; resolve(res); }
+                }
+
+                // 优先使用后端 /api/search（多 CDN 自动降级，可靠性高）
+                function tryBackend() {
+                    return fetch('http://localhost:8080/api/search?q=' + encodeURIComponent(q) + '&limit=1')
+                        .then(function(r) {
+                            if (!r.ok) throw new Error('HTTP ' + r.status);
+                            return r.json();
+                        })
+                        .then(function(data) {
+                            if (data && data.results && data.results.length) {
+                                var r = data.results[0];
+                                return {
+                                    lat: r.lat,
+                                    lng: r.lon,
+                                    name: r.name || q
+                                };
+                            }
+                            return null;
+                        });
+                }
+
+                // 后端失败时降级到 Nominatim CDN
+                function tryCDN() {
+                    return fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(q) + '&limit=1&accept-language=' + encodeURIComponent(window.APP_LANG || 'zh-CN') + '&addressdetails=1', {
+                        headers: { 'User-Agent': 'MapApp/1.0' }
+                    })
+                    .then(function(r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
+                    .then(function(data) {
+                        if (data && Array.isArray(data) && data.length) {
+                            var r = data[0];
+                            return {
+                                lat: parseFloat(r.lat),
+                                lng: parseFloat(r.lon),
+                                name: (r.display_name || '').split(',')[0] || q
+                            };
+                        }
+                        return null;
+                    });
+                }
+
+                // 8秒超时
+                var timeoutId = setTimeout(function() { if (!done) finish(null); }, 8000);
+
+                tryBackend().then(function(res) {
+                    if (done) return;
+                    if (res) {
+                        clearTimeout(timeoutId);
+                        finish(res);
+                    } else {
+                        // 后端无结果，尝试 CDN
+                        tryCDN().then(function(res2) {
+                            if (done) return;
+                            clearTimeout(timeoutId);
+                            finish(res2);
+                        }).catch(function() {
+                            if (!done) finish(null);
+                        });
+                    }
+                }).catch(function() {
+                    // 后端失败，尝试 CDN
+                    tryCDN().then(function(res2) {
+                        if (done) return;
+                        clearTimeout(timeoutId);
+                        finish(res2);
+                    }).catch(function() {
+                        if (!done) finish(null);
+                    });
+                });
+            });
+        }
+
+        function queryRoute() {
+            var fromVal = document.getElementById('route-from').value.trim();
+            var toVal = document.getElementById('route-to').value.trim();
+            if (!toVal) { toast('请输入终点'); return; }
+
+            var btn = document.getElementById('route-go');
+            btn.disabled = true; btn.textContent = '查询中...';
+            var stepsEl = document.getElementById('route-steps');
+            stepsEl.innerHTML = '';
+            stepsEl.style.display = 'none';
+
+            // 步行/骑行/驾车使用 OSRM
+            // 起点：优先使用已选坐标，其次当前位置，最后地理编码
+            var fromPromise;
+            if (routeFrom) {
+                fromPromise = Promise.resolve(routeFrom);
+            } else if (fromVal === '当前位置' || !fromVal) {
+                if (userLat && userLng) {
+                    fromPromise = Promise.resolve({ lat: userLat, lng: userLng, name: '当前位置' });
+                } else {
+                    // 没有当前位置，尝试获取
+                    fromPromise = new Promise(function(resolve) {
+                        if (!navigator.geolocation) {
+                            // 浏览器不支持定位，使用地图中心作为起点
+                            var c = map.getCenter();
+                            resolve({ lat: c.lat, lng: c.lng, name: '地图中心' });
+                            return;
+                        }
+                        navigator.geolocation.getCurrentPosition(
+                            function(pos) { resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, name: '当前位置' }); },
+                            function() {
+                                // 定位失败，使用地图中心
+                                var c = map.getCenter();
+                                resolve({ lat: c.lat, lng: c.lng, name: '地图中心' });
+                            },
+                            { timeout: 5000 }
+                        );
+                    });
+                }
+            } else {
+                fromPromise = geocode(fromVal);
+            }
+
+            var toPromise = routeTo ? Promise.resolve(routeTo) : geocode(toVal);
+
+            Promise.all([fromPromise, toPromise]).then(function(results) {
+                var from = results[0], to = results[1];
+                if (!from) { btn.disabled = false; btn.textContent = '查询'; toast('无法获取起点（请开启定位或输入起点）'); return; }
+                if (!to) { btn.disabled = false; btn.textContent = '查询'; toast('无法解析终点：' + toVal); return; }
+
+                routeFrom = from; routeTo = to;
+
+                // OSRM 正确的 profile 名称
+                // 走后端代理（/api/route），避免浏览器无法访问外网 HTTPS
+                var profile = routeMode === 'walking' ? 'walking' : routeMode === 'cycling' ? 'cycling' : 'driving';
+                var url = 'http://localhost:8080/api/route' +
+                    '?profile=' + encodeURIComponent(profile) +
+                    '&from_lng=' + from.lng + '&from_lat=' + from.lat +
+                    '&to_lng=' + to.lng + '&to_lat=' + to.lat;
+                return fetch(url).then(function(r) {
+                    if (!r.ok) {
+                        return r.json().catch(function() { return {}; }).then(function(j) {
+                            throw new Error(j.error || ('HTTP ' + r.status));
+                        });
+                    }
+                    return r.json();
+                });
+            }).then(function(data) {
+                btn.disabled = false; btn.textContent = '查询';
+                if (!data) return;
+                if (!data.routes || !data.routes.length) { toast('未找到路线'); return; }
+                var route = data.routes[0];
+                // 存储导航数据
+                navRouteData = route;
+                navRouteGeometry = route.geometry;
+                // 显示开始导航按钮
+                document.getElementById('route-nav-row').style.display = 'flex';
+                if (routeLine) map.removeLayer(routeLine);
+                routeLine = L.geoJSON(route.geometry, { style: { color: '#1a73e8', weight: 7, opacity: 0.85 } }).addTo(map);
+                map.fitBounds(routeLine.getBounds(), { padding: [60, 60] });
+                document.getElementById('route-duration').textContent = fmtDur(route.duration);
+                document.getElementById('route-distance').textContent = fmtDist(route.distance);
+                stepsEl.innerHTML = route.legs.slice(0, 2).map(function(leg) {
+                    return leg.steps.map(function(s) {
+                        var arrow = '→';
+                        if (s.maneuver && s.maneuver.modifier) {
+                            var m = { right: '→', left: '←', slight_right: '↗', slight_left: '↖', sharp_right: '⇢', sharp_left: '⇠', uturn: '↺', roundabout: '⟳' };
+                            arrow = m[s.maneuver.modifier] || '→';
+                        }
+                        var n = s.name || '继续前行';
+                        return '<div class="search-result" style="cursor:default;"><div class="result-icon">' + arrow + '</div><div class="result-text"><div class="result-title">' + esc(n) + '</div><div class="result-sub">' + fmtDist(s.distance) + '</div></div></div>';
+                    }).join('');
+                }).join('');
+                stepsEl.style.display = 'block';
+            }).catch(function(err) {
+                btn.disabled = false; btn.textContent = '查询';
+                toast('路线查询失败: ' + (err && err.message || '未知错误'));
+            });
+        }
+
+        // ==== 导航功能 ====
+        var navRouteData = null;
+        var navRouteGeometry = null;
+        var navActive = false;
+        var navWatchId = null;
+        var navCurrentStepIdx = 0;
+        var navTotalDistance = 0;
+        var navRemainingCoords = [];
+        var navAllSteps = [];
+        var navLastPos = null;
+        var navHeading = 0;
+        var navOffRoute = false;
+        var navOffRouteTimer = null;
+        var navTtsEnabled = false;
+        var navSpokenSteps = {};
+        var navRecentering = false;
+        var navMapRotated = false;
+
+        // 开始导航
+        document.getElementById('route-nav-start').addEventListener('click', function() {
+            if (!navRouteData) { toast('请先查询路线'); return; }
+            if (!navigator.geolocation) { toast('浏览器不支持定位'); return; }
+
+            routePanel.style.display = 'none';
+
+            var coords = [];
+            if (navRouteGeometry && navRouteGeometry.coordinates) {
+                if (navRouteGeometry.type === 'MultiLineString') {
+                    navRouteGeometry.coordinates.forEach(function(seg) {
+                        seg.forEach(function(c) { coords.push([c[0], c[1]]); });
+                    });
+                } else {
+                    navRouteGeometry.coordinates.forEach(function(c) { coords.push([c[0], c[1]]); });
+                }
+            }
+            navRemainingCoords = coords;
+            navTotalDistance = turfLength(coords);
+
+            var allSteps = [];
+            navRouteData.legs.forEach(function(leg) {
+                leg.steps.forEach(function(s) { allSteps.push(s); });
+            });
+            navAllSteps = allSteps;
+            navCurrentStepIdx = 0;
+            navOffRoute = false;
+
+            document.getElementById('nav-overlay').classList.add('show');
+            navActive = true;
+            navSpokenSteps = {};
+            updateNavTurn();
+
+            // 默认开启 TTS
+            navTtsEnabled = true;
+            document.getElementById('nav-tts-toggle').classList.add('active');
+
+            // 启动时播报一次
+            speakNavInstruction('导航开始，' + document.getElementById('nav-turn-instr').textContent);
+
+            // 进入 3D 导航视角：缩放 18，车头朝上
+            map.setZoom(18, { animate: true });
+            navMapRotated = true;
+
+            toast('导航已开始');
+            if (navWatchId) navigator.geolocation.clearWatch(navWatchId);
+            navWatchId = navigator.geolocation.watchPosition(
+                onNavPosition,
+                function(err) { toast('定位失败: ' + err.message); },
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+            );
+        });
+
+        function onNavPosition(pos) {
+            if (!navActive) return;
+            var la = pos.coords.latitude;
+            var ln = pos.coords.longitude;
+            var speed = pos.coords.speed || 0;
+            var heading = pos.coords.heading;
+
+            // 计算航向：优先 GPS heading，否则根据最近路线点方向
+            if (heading != null && !isNaN(heading)) {
+                navHeading = heading;
+            } else if (navLastPos) {
+                navHeading = computeBearing(navLastPos.lat, navLastPos.lng, la, ln);
+            }
+            userLat = la; userLng = ln;
+
+            // 绑路：把位置吸附到最近路线点
+            if (!navRemainingCoords || !navRemainingCoords.length) return;
+            var closestIdx = findClosestPoint(la, ln, navRemainingCoords);
+            var snapped = navRemainingCoords[closestIdx];
+            if (!snapped) return;
+            var distToRoute = haversineDist([ln, la], snapped);
+            var displayLat = distToRoute > 25 ? la : snapped[1];
+            var displayLng = distToRoute > 25 ? ln : snapped[0];
+
+            if (locMarker) map.removeLayer(locMarker);
+            if (locCircle) map.removeLayer(locCircle);
+            locCircle = L.circle([displayLat, displayLng], { radius: pos.coords.accuracy || 10, fillColor: '#1a73e8', fillOpacity: 0.08, color: '#1a73e8', weight: 1, opacity: 0.4 }).addTo(map);
+            locMarker = L.marker([displayLat, displayLng], { icon: locIcon, zIndexOffset: 1000, interactive: false }).addTo(map);
+
+            // 旋转地图：车头始终朝上
+            if (navMapRotated && !navRecentering) {
+                map.setView([displayLat, displayLng], map.getZoom(), { animate: false });
+                rotateMapToHeading(navHeading);
+            } else {
+                map.panTo([displayLat, displayLng], { animate: true, duration: 0.3 });
+            }
+
+            var speedKmh = speed * 3.6;
+            document.getElementById('nav-speed').textContent = speedKmh.toFixed(0) + ' km/h';
+
+            // 剩余距离（从当前位置到终点）
+            var remaining = distToRoute; // 当前位置到最近路线点的距离
+            for (var i = closestIdx + 1; i < navRemainingCoords.length; i++) {
+                remaining += haversineDist(navRemainingCoords[i-1], navRemainingCoords[i]);
+            }
+            var remainingKm = remaining / 1000;
+
+            // 偏离路线检测与自动重算
+            if (distToRoute > 80 && !navOffRoute) {
+                navOffRoute = true;
+                document.getElementById('nav-offroute').style.display = 'block';
+                speakNavInstruction('您已偏离路线，正在重新规划');
+                // 用当前位置作为起点重新规划到原终点
+                recalcRouteFromCurrentPos(la, ln);
+            }
+
+            var progress = navTotalDistance > 0 ? Math.max(0, Math.min(100, (1 - remaining / navTotalDistance) * 100)) : 0;
+            document.getElementById('nav-progress-fill').style.width = progress + '%';
+
+            var etaSec = speed > 0.5 ? remaining / speed : 0;
+            document.getElementById('nav-eta-time').textContent = etaSec > 0 ? fmtDur(etaSec) : '-- 分钟';
+            document.getElementById('nav-eta-dist').textContent = remainingKm > 0 ? fmtDist(remaining) : '已到达';
+
+            updateNavStep(remaining);
+            maybeSpeakNextStep(remaining);
+
+            if (remainingKm < 0.02) {
+                stopNavigation();
+                speakNavInstruction('已到达目的地，导航结束');
+                toast('已到达目的地！');
+            }
+
+            navLastPos = { lat: la, lng: ln };
+        }
+
+        function computeBearing(lat1, lng1, lat2, lng2) {
+            var r = Math.PI / 180;
+            var y = Math.sin((lng2 - lng1) * r) * Math.cos(lat2 * r);
+            var x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lng2 - lng1) * r);
+            var brng = Math.atan2(y, x) / r;
+            return (brng + 360) % 360;
+        }
+
+        function rotateMapToHeading(heading) {
+            // 旋转 .leaflet-map-pane（包含瓦片和标记），而非 .leaflet-container
+            // 这样不会破坏 Leaflet 的鼠标/触摸坐标映射
+            var pane = document.querySelector('.leaflet-map-pane');
+            if (!pane) return;
+            // 地图旋转：车头朝上 => 地图向反方向旋转
+            pane.style.transform = pane.style.transform.replace(/rotate\([^)]*\)/g, '') + ' rotate(' + (-heading) + 'deg)';
+            pane.style.transformOrigin = 'center center';
+            // 同步旋转指南针按钮
+            var compass = document.getElementById('nav-compass');
+            if (compass) compass.style.transform = 'rotate(' + heading + 'deg)';
+        }
+
+        function resetMapRotation() {
+            var pane = document.querySelector('.leaflet-map-pane');
+            if (pane) {
+                pane.style.transform = pane.style.transform.replace(/rotate\([^)]*\)/g, '');
+                pane.style.transformOrigin = '';
+            }
+            var compass = document.getElementById('nav-compass');
+            if (compass) compass.style.transform = '';
+        }
+
+        function recalcRouteFromCurrentPos(lat, lng) {
+            var to = routeTo;
+            if (!to) { navOffRoute = false; document.getElementById('nav-offroute').style.display = 'none'; return; }
+            var profile = routeMode === 'walking' ? 'walking' : routeMode === 'cycling' ? 'cycling' : 'driving';
+            var url = 'http://localhost:8080/api/route' +
+                '?profile=' + encodeURIComponent(profile) +
+                '&from_lng=' + lng + '&from_lat=' + lat +
+                '&to_lng=' + to.lng + '&to_lat=' + to.lat;
+            fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+                if (!data || !data.routes || !data.routes.length) return;
+                var route = data.routes[0];
+                navRouteData = route;
+                navRouteGeometry = route.geometry;
+                var coords = [];
+                if (navRouteGeometry && navRouteGeometry.coordinates) {
+                    if (navRouteGeometry.type === 'MultiLineString') {
+                        navRouteGeometry.coordinates.forEach(function(seg) {
+                            seg.forEach(function(c) { coords.push([c[0], c[1]]); });
+                        });
+                    } else {
+                        navRouteGeometry.coordinates.forEach(function(c) { coords.push([c[0], c[1]]); });
+                    }
+                }
+                navRemainingCoords = coords;
+                navTotalDistance = turfLength(coords);
+                var allSteps = [];
+                navRouteData.legs.forEach(function(leg) { leg.steps.forEach(function(s) { allSteps.push(s); }); });
+                navAllSteps = allSteps;
+                navCurrentStepIdx = 0;
+                navSpokenSteps = {};
+                if (routeLine) map.removeLayer(routeLine);
+                routeLine = L.polyline(coords.map(function(c) { return [c[1], c[0]]; }), { color: '#1a73e8', weight: 7, opacity: 0.85 }).addTo(map);
+                navOffRoute = false;
+                document.getElementById('nav-offroute').style.display = 'none';
+                updateNavTurn();
+                speakNavInstruction('路线已重新规划，' + document.getElementById('nav-turn-instr').textContent);
+            }).catch(function() {
+                // 重新规划失败：保持 navOffRoute = true，避免立即重复请求
+                // 30 秒后允许重试
+                setTimeout(function() { navOffRoute = false; }, 30000);
+            });
+        }
+
+        function findClosestPoint(lat, lng, coords) {
+            var minDist = Infinity, minIdx = 0;
+            for (var i = 0; i < coords.length; i++) {
+                var d = haversineDist([lng, lat], coords[i]);
+                if (d < minDist) { minDist = d; minIdx = i; }
+            }
+            return minIdx;
+        }
+
+        function updateNavStep(remaining) {
+            if (!navAllSteps || !navAllSteps.length) return;
+            // remaining = 当前位置到终点的剩余距离
+            // traveled = 已行驶距离 = 总距离 - 剩余距离
+            var traveled = navTotalDistance - remaining;
+            if (traveled < 0) traveled = 0;
+            var cumul = 0;
+            var found = false;
+            for (var i = 0; i < navAllSteps.length; i++) {
+                cumul += navAllSteps[i].distance;
+                if (traveled < cumul && !found) {
+                    navCurrentStepIdx = i;
+                    found = true;
+                }
+            }
+            if (!found) navCurrentStepIdx = navAllSteps.length - 1;
+            updateNavTurn();
+        }
+
+        function updateNavTurn() {
+            if (!navAllSteps || !navAllSteps.length) return;
+            var step = navAllSteps[Math.min(navCurrentStepIdx, navAllSteps.length - 1)];
+            var instr = step.maneuver ? getManeuverInstr(step.maneuver) : '继续前行';
+            var road = step.name || '';
+
+            document.getElementById('nav-turn-instr').textContent = instr + (road ? ' → ' + road : '');
+            document.getElementById('nav-turn-dist').textContent = fmtDist(step.distance);
+            document.getElementById('nav-turn-icon').textContent = step.maneuver ? getManeuverIcon(step.maneuver) : '↑';
+
+            // 下下一步预览
+            var nextEl = document.getElementById('nav-turn-next');
+            var nextIdx = navCurrentStepIdx + 1;
+            if (nextIdx < navAllSteps.length) {
+                var nextStep = navAllSteps[nextIdx];
+                var nextInstr = nextStep.maneuver ? getManeuverInstr(nextStep.maneuver) : '继续前行';
+                var nextRoad = nextStep.name || '';
+                document.getElementById('nav-turn-next-icon').textContent = nextStep.maneuver ? getManeuverIcon(nextStep.maneuver) : '↑';
+                document.getElementById('nav-turn-next-text').textContent = nextInstr + (nextRoad ? ' → ' + nextRoad : '');
+                nextEl.classList.add('show');
+            } else {
+                nextEl.classList.remove('show');
+            }
+        }
+
+        // TTS 语音播报
+        function speakNavInstruction(text) {
+            if (!navTtsEnabled || !window.speechSynthesis) return;
+            window.speechSynthesis.cancel();
+            var u = new SpeechSynthesisUtterance(text);
+            u.lang = window.APP_LANG || 'zh-CN';
+            u.rate = 1.05;
+            u.pitch = 1;
+            window.speechSynthesis.speak(u);
+        }
+
+        function maybeSpeakNextStep(remaining) {
+            if (!navAllSteps || !navAllSteps.length) return;
+            var step = navAllSteps[Math.min(navCurrentStepIdx, navAllSteps.length - 1)];
+            if (!step || navSpokenSteps[navCurrentStepIdx]) return;
+            // 当进入新步骤时播报（updateNavStep 已根据已行驶距离正确计算步骤索引）
+            navSpokenSteps[navCurrentStepIdx] = true;
+            var text = document.getElementById('nav-turn-instr').textContent;
+            var distText = document.getElementById('nav-turn-dist').textContent;
+            speakNavInstruction('前方' + distText + '，' + text);
+        }
+
+        function getManeuverInstr(m) {
+            var t = m.type || '';
+            var mod = m.modifier || '';
+            var map = {
+                'turn': { left: '左转', right: '右转', slight_left: '稍向左转', slight_right: '稍向右转', sharp_left: '急左转', sharp_right: '急右转', uturn: '掉头' },
+                'new name': { straight: '继续直行', slight_left: '稍向左前方', slight_right: '稍向右前方' },
+                'depart': { straight: '出发' },
+                'arrive': { straight: '到达目的地' },
+                'continue': { straight: '继续直行', slight_left: '靠左行驶', slight_right: '靠右行驶' },
+                'roundabout': { right: '进入环岛' },
+                'merge': { straight: '并入主路', slight_left: '向左并道', slight_right: '向右并道' },
+                'on ramp': { straight: '上匝道' },
+                'off ramp': { straight: '下匝道' },
+                'fork': { straight: '保持直行', slight_left: '靠左', slight_right: '靠右' }
+            };
+            if (map[t] && map[t][mod]) return map[t][mod];
+            if (map[t] && map[t].straight) return map[t].straight;
+            return '继续前行';
+        }
+
+        function getManeuverIcon(m) {
+            var mod = m.modifier || '';
+            var icons = { left: '←', right: '→', slight_left: '↖', slight_right: '↗', sharp_left: '⇠', sharp_right: '⇢', uturn: '↺', straight: '↑' };
+            return icons[mod] || '↑';
+        }
+
+        function stopNavigation() {
+            navActive = false;
+            navMapRotated = false;
+            navTtsEnabled = false;
+            document.getElementById('nav-overlay').classList.remove('show');
+            document.getElementById('nav-offroute').style.display = 'none';
+            document.getElementById('nav-tts-toggle').classList.remove('active');
+            document.getElementById('route-nav-row').style.display = 'none';
+            if (navWatchId) { navigator.geolocation.clearWatch(navWatchId); navWatchId = null; }
+            if (navOffRouteTimer) { clearTimeout(navOffRouteTimer); navOffRouteTimer = null; }
+            navRouteData = null;
+            navRouteGeometry = null;
+            navAllSteps = [];
+            navRemainingCoords = [];
+            navLastPos = null;
+            resetMapRotation();
+            if (window.speechSynthesis) window.speechSynthesis.cancel();
+            toast('导航已结束');
+        }
+
+        document.getElementById('nav-btn-stop').addEventListener('click', stopNavigation);
+        document.getElementById('nav-btn-recenter').addEventListener('click', function() {
+            if (navLastPos) {
+                navRecentering = true;
+                map.flyTo([navLastPos.lat, navLastPos.lng], Math.min(18, curLayer.options.maxZoom || 20), { duration: 0.5 });
+                setTimeout(function() { navRecentering = false; }, 600);
+            }
+        });
+        document.getElementById('nav-compass').addEventListener('click', function() {
+            navMapRotated = !navMapRotated;
+            if (navMapRotated) {
+                if (navLastPos) map.setView([navLastPos.lat, navLastPos.lng], 18, { animate: true });
+                rotateMapToHeading(navHeading);
+            } else {
+                resetMapRotation();
+                if (navLastPos) map.flyTo([navLastPos.lat, navLastPos.lng], 16, { duration: 0.3 });
+            }
+        });
+        document.getElementById('nav-tts-toggle').addEventListener('click', function() {
+            navTtsEnabled = !navTtsEnabled;
+            this.classList.toggle('active', navTtsEnabled);
+            if (!navTtsEnabled && window.speechSynthesis) window.speechSynthesis.cancel();
+            else speakNavInstruction('语音播报已开启');
+        });
+
+        function haversineDist(a, b) {
+            var R = 6371000;
+            var dLat = (b[1] - a[1]) * Math.PI / 180;
+            var dLng = (b[0] - a[0]) * Math.PI / 180;
+            var lat1 = a[1] * Math.PI / 180;
+            var lat2 = b[1] * Math.PI / 180;
+            var sinDLat = Math.sin(dLat / 2);
+            var sinDLng = Math.sin(dLng / 2);
+            var aVal = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
+            return R * 2 * Math.atan2(Math.sqrt(aVal), Math.sqrt(1 - aVal));
+        }
+
+        function turfLength(coords) {
+            var total = 0;
+            for (var i = 1; i < coords.length; i++) {
+                total += haversineDist(coords[i-1], coords[i]);
+            }
+            return total;
+        }
+
+        // ==== 坐标转换 WGS-84 → GCJ-02 → BD-09 ====
+        function wgs84ToGcj02(lng, lat) {
+            var a = 6378245.0, ee = 0.00669342162296594323;
+            if (lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271) return [lng, lat];
+            var dlat = _transformLat(lng - 105.0, lat - 35.0);
+            var dlng = _transformLng(lng - 105.0, lat - 35.0);
+            var radlat = lat / 180.0 * Math.PI;
+            var magic = Math.sin(radlat);
+            magic = 1 - ee * magic * magic;
+            var sq = Math.sqrt(magic);
+            dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sq) * Math.PI);
+            dlng = (dlng * 180.0) / (a / sq * Math.cos(radlat) * Math.PI);
+            return [lng + dlng, lat + dlat];
+        }
+        function gcj02ToBd09(lng, lat) {
+            var z = Math.sqrt(lng * lng + lat * lat) + 0.00002 * Math.sin(lat * Math.PI * 3000.0 / 180.0);
+            var t = Math.atan2(lat, lng) + 0.000003 * Math.cos(lng * Math.PI * 3000.0 / 180.0);
+            return [z * Math.cos(t) + 0.0065, z * Math.sin(t) + 0.006];
+        }
+        function _transformLat(x, y) {
+            var r = -100.0 + 2.0*x + 3.0*y + 0.2*y*y + 0.1*x*y + 0.2*Math.sqrt(Math.abs(x));
+            r += (20.0*Math.sin(6.0*x*Math.PI) + 20.0*Math.sin(2.0*x*Math.PI)) * 2.0 / 3.0;
+            r += (20.0*Math.sin(y*Math.PI) + 40.0*Math.sin(y/3.0*Math.PI)) * 2.0 / 3.0;
+            r += (160.0*Math.sin(y/12.0*Math.PI) + 320.0*Math.sin(y*Math.PI/30.0)) * 2.0 / 3.0;
+            return r;
+        }
+        function _transformLng(x, y) {
+            var r = 300.0 + x + 2.0*y + 0.1*x*x + 0.1*x*y + 0.1*Math.sqrt(Math.abs(x));
+            r += (20.0*Math.sin(6.0*x*Math.PI) + 20.0*Math.sin(2.0*x*Math.PI)) * 2.0 / 3.0;
+            r += (20.0*Math.sin(x*Math.PI) + 40.0*Math.sin(x/3.0*Math.PI)) * 2.0 / 3.0;
+            r += (150.0*Math.sin(x/12.0*Math.PI) + 300.0*Math.sin(x/30.0*Math.PI)) * 2.0 / 3.0;
+            return r;
+        }
+
+        // ==== 街景：附近照片搜索（Wikimedia Commons） ====
+        var currentPhotos = [];
+        var currentPhotoIdx = 0;
+
+        function openStreetView(la, ln) {
+            var overlay = document.getElementById('streetview-overlay');
+            var grid = document.getElementById('streetview-grid');
+            var sub = document.getElementById('streetview-sub');
+
+            sub.textContent = la.toFixed(5) + ', ' + ln.toFixed(5);
+            overlay.classList.add('show');
+            grid.innerHTML = '<div class="streetview-loading"><div class="spinner"></div><div>正在搜索附近照片…</div></div>';
+
+            // 使用后端代理获取 Wikimedia Commons 照片
+            fetch('http://localhost:8080/api/wikimedia?lat=' + encodeURIComponent(la) + '&lon=' + encodeURIComponent(ln) + '&radius=10000')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data || !data.photos || !data.photos.length) {
+                        renderNoPhotos();
+                        return;
+                    }
+                    var photos = data.photos.map(function(p) {
+                        return {
+                            title: p.title,
+                            name: p.name,
+                            lat: p.lat,
+                            lng: p.lng,
+                            dist: p.dist,
+                            thumb: p.thumb,
+                            full: p.url,
+                            page: 'https://commons.wikimedia.org/wiki/' + encodeURIComponent(p.title)
+                        };
+                    }).filter(function(p) { return p.thumb; });
+                    renderPhotos(photos);
+                })
+                .catch(function() {
+                    renderNoPhotos(true);
+                });
+        }
+
+        function renderPhotos(photos) {
+            currentPhotos = photos;
+            var grid = document.getElementById('streetview-grid');
+            if (!photos.length) { renderNoPhotos(); return; }
+            grid.innerHTML = '';
+            photos.forEach(function(p, idx) {
+                var card = document.createElement('div');
+                card.className = 'photo-card';
+                var distText = p.dist < 1000 ? Math.round(p.dist) + ' m' : (p.dist / 1000).toFixed(1) + ' km';
+                // 使用 DOM API 避免 XSS
+                var img = document.createElement('img');
+                img.src = safeImgUrl(p.thumb);
+                img.alt = p.name;
+                img.loading = 'lazy';
+                var distSpan = document.createElement('span');
+                distSpan.className = 'photo-card-dist';
+                distSpan.textContent = distText;
+                var titleSpan = document.createElement('span');
+                titleSpan.className = 'photo-card-title';
+                titleSpan.textContent = p.name;
+                card.appendChild(img);
+                card.appendChild(distSpan);
+                card.appendChild(titleSpan);
+                card.addEventListener('click', function() { openPhotoViewer(idx); });
+                grid.appendChild(card);
+            });
+        }
+
+        function renderNoPhotos(failed) {
+            var grid = document.getElementById('streetview-grid');
+            grid.innerHTML =
+                '<div class="streetview-grid-empty">' +
+                    '<svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>' +
+                    '<div style="font-size:16px;margin-bottom:8px;">' + (failed ? '网络请求失败' : '附近暂无照片') + '</div>' +
+                    '<div style="font-size:13px;color:#80868b;">' + (failed ? '请检查网络后重试' : '尝试放大地图范围或选择其他地点') + '</div>' +
+                '</div>';
+        }
+
+        function openPhotoViewer(idx) {
+            if (!currentPhotos.length) return;
+            currentPhotoIdx = idx;
+            var viewer = document.getElementById('photo-viewer');
+            var img = document.getElementById('photo-viewer-img');
+            var cap = document.getElementById('photo-viewer-caption');
+            var counter = document.getElementById('photo-viewer-counter');
+            updatePhotoViewer();
+            viewer.classList.add('show');
+        }
+        function updatePhotoViewer() {
+            var p = currentPhotos[currentPhotoIdx];
+            if (!p) return;
+            document.getElementById('photo-viewer-img').src = safeImgUrl(p.full || p.thumb);
+            document.getElementById('photo-viewer-caption').textContent = p.name + ' · ' +
+                (p.dist < 1000 ? Math.round(p.dist) + ' m' : (p.dist / 1000).toFixed(1) + ' km');
+            document.getElementById('photo-viewer-counter').textContent =
+                (currentPhotoIdx + 1) + ' / ' + currentPhotos.length;
+        }
+        document.getElementById('photo-viewer-close').addEventListener('click', function() {
+            document.getElementById('photo-viewer').classList.remove('show');
+        });
+        document.getElementById('photo-viewer-prev').addEventListener('click', function() {
+            if (!currentPhotos.length) return;
+            currentPhotoIdx = (currentPhotoIdx - 1 + currentPhotos.length) % currentPhotos.length;
+            updatePhotoViewer();
+        });
+        document.getElementById('photo-viewer-next').addEventListener('click', function() {
+            if (!currentPhotos.length) return;
+            currentPhotoIdx = (currentPhotoIdx + 1) % currentPhotos.length;
+            updatePhotoViewer();
+        });
+        document.getElementById('photo-viewer').addEventListener('click', function(e) {
+            if (e.target === this) this.classList.remove('show');
+        });
+        document.addEventListener('keydown', function(e) {
+            var viewer = document.getElementById('photo-viewer');
+            if (!viewer.classList.contains('show')) return;
+            if (e.key === 'Escape') viewer.classList.remove('show');
+            else if (e.key === 'ArrowLeft') document.getElementById('photo-viewer-prev').click();
+            else if (e.key === 'ArrowRight') document.getElementById('photo-viewer-next').click();
+        });
+
+        document.getElementById('streetview-close').addEventListener('click', function() {
+            document.getElementById('streetview-overlay').classList.remove('show');
+        });
+
+        
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, function(c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+        function safeImgUrl(u) {
+            if (!u || typeof u !== 'string') return '';
+            // 仅允许 https 协议的已知图片域名
+            if (/^https:\/\/(upload\.wikimedia\.org|maps\.basemaps\.cartocdn\.com|server\.arcgisonline\.com|tile\.thunderforest\.com)\//.test(u)) return u;
+            return '';
+        }
+
+        // ==== 全局点击关闭 ====
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.search-panel') && !e.target.closest('#results-area')) {
+                resultsArea.style.display = 'none';
+            }
+            if (!e.target.closest('#layer-panel') && !e.target.closest('#btn-layer')) {
+                document.getElementById('layer-panel').classList.remove('show');
+            }
+        });
+
+        // ==== 下载瓦片 ====
+        var offlineTileCache = {};
+        var offlineLayer = null;
+
+        (function initTileDownload() {
+            var overlay = document.getElementById('tile-download-overlay');
+            var layerSelect = document.getElementById('tile-layer-select');
+            var zoomMin = document.getElementById('tile-zoom-min');
+            var zoomMax = document.getElementById('tile-zoom-max');
+            var areaInfo = document.getElementById('tile-area-info');
+            var hint = document.getElementById('tile-hint');
+            var btnCancel = document.getElementById('tile-btn-cancel');
+            var btnDownload = document.getElementById('tile-btn-download');
+            var btnImport = document.getElementById('tile-btn-import');
+            var importFile = document.getElementById('tile-import-file');
+            var offlineStatus = document.getElementById('offline-status');
+            var body = document.getElementById('tile-panel-body');
+            var footer = document.getElementById('tile-panel-footer');
+            var progressWrap = document.getElementById('tile-progress-wrap');
+            var progressText = document.getElementById('tile-progress-text');
+            var progressBar = document.getElementById('tile-progress-bar');
+            var progressDetail = document.getElementById('tile-progress-detail');
+            var regionInput = document.getElementById('tile-region-input');
+            var regionResults = document.getElementById('tile-region-results');
+
+            var drawLayer = null;
+            var drawnBounds = null;
+            var selectedRegion = null;
+            var regionSearchTimer = null;
+
+            // 初始化图层选择
+            function populateLayerSelect() {
+                layerSelect.innerHTML = Object.keys(layerNames).map(function(k) {
+                    return '<option value="' + k + '">' + layerNames[k] + '</option>';
+                }).join('');
+                if (curLayerName && layers[curLayerName]) layerSelect.value = curLayerName;
+            }
+
+            // 初始化缩放级别
+            function populateZoomSelects() {
+                var cur = map.getZoom() || 10;
+                var minZ = Math.max(1, cur - 3);
+                var maxZ = Math.min(20, cur + 2);
+                var html = '';
+                for (var z = 1; z <= 20; z++) html += '<option value="' + z + '">' + z + '</option>';
+                zoomMin.innerHTML = html;
+                zoomMax.innerHTML = html;
+                zoomMin.value = minZ;
+                zoomMax.value = maxZ;
+                updateTileCount();
+            }
+
+            // 计算边界框内的瓦片坐标
+            function getTileCoords(bounds, z) {
+                var n = Math.pow(2, z);
+                var minLat = bounds.getSouth(), maxLat = bounds.getNorth();
+                var minLng = bounds.getWest(), maxLng = bounds.getEast();
+                var minY = Math.floor((1 - Math.log(Math.tan(maxLat * Math.PI / 180) + 1 / Math.cos(maxLat * Math.PI / 180)) / Math.PI) / 2 * n);
+                var maxY = Math.floor((1 - Math.log(Math.tan(minLat * Math.PI / 180) + 1 / Math.cos(minLat * Math.PI / 180)) / Math.PI) / 2 * n);
+                var minX = Math.floor((minLng + 180) / 360 * n);
+                var maxX = Math.floor((maxLng + 180) / 360 * n);
+                minX = Math.max(0, Math.min(n - 1, minX));
+                maxX = Math.max(0, Math.min(n - 1, maxX));
+                minY = Math.max(0, Math.min(n - 1, minY));
+                maxY = Math.max(0, Math.min(n - 1, maxY));
+                var coords = [];
+                for (var y = minY; y <= maxY; y++) {
+                    for (var x = minX; x <= maxX; x++) {
+                        coords.push({ z: z, x: x, y: y });
+                    }
+                }
+                return coords;
+            }
+
+            function getAllTileCoords(bounds, minZ, maxZ) {
+                var all = [];
+                for (var z = minZ; z <= maxZ; z++) all = all.concat(getTileCoords(bounds, z));
+                return all;
+            }
+
+            function estimateSize(count) {
+                var kb = count * 15;
+                if (kb < 1024) return kb + ' KB';
+                if (kb < 1024 * 1024) return (kb / 1024).toFixed(1) + ' MB';
+                return (kb / 1024 / 1024).toFixed(1) + ' GB';
+            }
+
+            function updateTileCount() {
+                if (!drawnBounds) return;
+                var minZ = parseInt(zoomMin.value);
+                var maxZ = parseInt(zoomMax.value);
+                var coords = getAllTileCoords(drawnBounds, minZ, maxZ);
+                var count = coords.length;
+                var estSize = estimateSize(count);
+                var sw = drawnBounds.getSouthWest();
+                var ne = drawnBounds.getNorthEast();
+                areaInfo.innerHTML =
+                    (selectedRegion ? '<strong>' + esc(selectedRegion.name) + '</strong><br>' : '') +
+                    '范围: ' + sw.lat.toFixed(4) + ',' + sw.lng.toFixed(4) + ' ↔ ' +
+                    ne.lat.toFixed(4) + ',' + ne.lng.toFixed(4) + '<br>' +
+                    '缩放: ' + minZ + '–' + maxZ + ' · <strong>' + count + ' 张瓦片</strong><br>' +
+                    '预估大小: <strong>' + estSize + '</strong>';
+                btnDownload.disabled = count === 0 || count > 5000;
+                if (count > 5000) {
+                    hint.textContent = '瓦片数量过多（' + count + '），请缩小范围或降低缩放级别';
+                    hint.style.color = '#d93025';
+                } else {
+                    hint.textContent = '瓦片数量取决于范围大小和缩放级别，高级别瓦片数量会急剧增加';
+                    hint.style.color = '';
+                }
+            }
+
+            // ==== 地区搜索 ====
+            regionInput.addEventListener('input', function() {
+                var q = this.value.trim();
+                clearTimeout(regionSearchTimer);
+                if (q.length < 2) {
+                    regionResults.style.display = 'none';
+                    return;
+                }
+                regionSearchTimer = setTimeout(function() { searchRegion(q); }, 400);
+            });
+
+            regionInput.addEventListener('focus', function() {
+                if (regionResults.children.length > 0) regionResults.style.display = 'block';
+            });
+
+            var regionAbort = null;
+
+            function searchRegion(q) {
+                regionResults.innerHTML = '<div class="tile-region-loading">搜索中…</div>';
+                regionResults.style.display = 'block';
+
+                if (regionAbort) { try { regionAbort.abort(); } catch(ex) {} }
+                regionAbort = new AbortController();
+                var sig = regionAbort.signal;
+
+                // 使用后端统一搜索 API
+                fetch('http://localhost:8080/api/search?q=' + encodeURIComponent(q) + '&limit=10', { signal: sig })
+                    .then(function(r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.json();
+                    })
+                    .then(function(data) {
+                        if (!data || !data.results || !data.results.length) {
+                            regionResults.innerHTML = '<div class="tile-region-loading">未找到结果</div>';
+                            return;
+                        }
+                        regionResults.innerHTML = '';
+                        data.results.forEach(function(item) {
+                            var div = document.createElement('div');
+                            div.className = 'tile-region-item';
+                            var nameParts = item.display_name.split(',');
+                            var name = nameParts[0].trim();
+                            var sub = nameParts.slice(1, 3).join(',').trim();
+                            var typeLabel = '';
+                            if (item.type === 'administrative' || item.osm_type === 'relation') typeLabel = '行政区划';
+                            else if (item.type === 'city' || item.type === 'town' || item.type === 'place:city') typeLabel = '城市';
+                            else if (item.type === 'country' || item.type === 'place:country') typeLabel = '国家';
+                            else if (item.type === 'state' || item.type === 'place:state') typeLabel = '省份';
+                            var nameDiv = document.createElement('div');
+                            nameDiv.className = 'tile-region-item-name';
+                            nameDiv.textContent = name;
+                            if (typeLabel) {
+                                var badge = document.createElement('span');
+                                badge.style.cssText = 'font-size:11px;color:#1a73e8;font-weight:400;margin-left:6px';
+                                badge.textContent = '(' + typeLabel + ')';
+                                nameDiv.appendChild(badge);
+                            }
+                            var subDiv = document.createElement('div');
+                            subDiv.className = 'tile-region-item-sub';
+                            subDiv.textContent = sub;
+                            div.appendChild(nameDiv);
+                            div.appendChild(subDiv);
+                            div.addEventListener('click', function() {
+                                selectRegion(item, name);
+                            });
+                            regionResults.appendChild(div);
+                        });
+                    })
+                    .catch(function(e) {
+                        if (e.name === 'AbortError') return;
+                        regionResults.innerHTML = '<div class="tile-region-loading">搜索失败，请检查网络后重试</div>';
+                    });
+            }
+
+            function selectRegion(item, name) {
+                selectedRegion = { name: name, displayName: item.display_name };
+                regionInput.value = name;
+                regionResults.style.display = 'none';
+
+                // 获取边界框
+                var bbox;
+                if (item.boundingbox && item.boundingbox.length === 4) {
+                    var bb = item.boundingbox;
+                    bbox = [[parseFloat(bb[0]), parseFloat(bb[2])], [parseFloat(bb[1]), parseFloat(bb[3])]];
+                } else if (item.lat != null && item.lon != null) {
+                    // 无边界框时根据类型估算范围
+                    var lat = parseFloat(item.lat), lng = parseFloat(item.lon);
+                    var delta = 0.5; // 默认城市级
+                    if (item.type === 'country' || item.type === 'place:country') delta = 5;
+                    else if (item.type === 'state' || item.type === 'place:state' || item.type === 'administrative') delta = 2;
+                    else if (item.type === 'city' || item.type === 'town' || item.type === 'place:city') delta = 0.5;
+                    else if (item.type === 'village' || item.type === 'house') delta = 0.05;
+                    bbox = [[lat - delta, lng - delta], [lat + delta, lng + delta]];
+                }
+
+                if (!bbox) { toast('无法获取该地区范围'); return; }
+
+                drawnBounds = L.latLngBounds(bbox);
+
+                // 在地图上显示范围
+                if (drawLayer) map.removeLayer(drawLayer);
+                drawLayer = L.rectangle(bbox, {
+                    color: '#1a73e8', weight: 2, fillColor: '#1a73e8', fillOpacity: .12
+                }).addTo(map);
+                map.fitBounds(drawnBounds, { padding: [40, 40] });
+
+                updateTileCount();
+            }
+
+            // 点击外部关闭搜索结果
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('#tile-region-input') && !e.target.closest('#tile-region-results')) {
+                    regionResults.style.display = 'none';
+                }
+            });
+
+            function openTileDownloadPanel() {
+                overlay.classList.add('show');
+                progressWrap.classList.remove('show');
+                body.style.display = 'block';
+                footer.style.display = 'flex';
+                drawnBounds = null;
+                selectedRegion = null;
+                btnDownload.disabled = true;
+                regionInput.value = '';
+                regionResults.style.display = 'none';
+                areaInfo.innerHTML = '请输入地区名称搜索';
+                hint.textContent = '瓦片数量取决于范围大小和缩放级别，高级别瓦片数量会急剧增加';
+                hint.style.color = '';
+                populateLayerSelect();
+                populateZoomSelects();
+                if (drawLayer) { map.removeLayer(drawLayer); drawLayer = null; }
+                updateOfflineStatus();
+            }
+
+            function closeTilePanel() {
+                overlay.classList.remove('show');
+                if (drawLayer) { map.removeLayer(drawLayer); drawLayer = null; }
+            }
+
+            zoomMin.addEventListener('change', updateTileCount);
+            zoomMax.addEventListener('change', updateTileCount);
+
+            btnCancel.addEventListener('click', closeTilePanel);
+            overlay.addEventListener('click', function(e) {
+                if (e.target === overlay) closeTilePanel();
+            });
+            document.getElementById('tile-panel-close').addEventListener('click', closeTilePanel);
+
+            btnDownload.addEventListener('click', function() {
+                if (!drawnBounds) { toast('请先选择地区'); return; }
+                var layerName = layerSelect.value;
+                var minZ = parseInt(zoomMin.value);
+                var maxZ = parseInt(zoomMax.value);
+                var coords = getAllTileCoords(drawnBounds, minZ, maxZ);
+                if (!coords.length) { toast('该区域无瓦片'); return; }
+
+                var layer = layers[layerName];
+                var urlTemplate = layer && layer._url ? layer._url : '';
+                if (!urlTemplate) { toast('无法获取瓦片地址'); return; }
+
+                // 显示进度
+                body.style.display = 'none';
+                footer.style.display = 'none';
+                progressWrap.classList.add('show');
+                progressBar.style.width = '0%';
+                progressText.textContent = '正在下载 0 / ' + coords.length + ' 瓦片…';
+                progressDetail.textContent = '';
+
+                var zip = new JSZip();
+                var loaded = 0;
+                var failed = 0;
+                var concurrency = 8; // 并行下载数
+                var maxRetries = 2;  // 失败重试次数
+                var retryQueue = []; // 重试队列
+                var counted = {}; // 防止重试时重复计数
+
+                function markProgress(coord) {
+                    var key = coord.z + '_' + coord.x + '_' + coord.y;
+                    if (counted[key]) return;
+                    counted[key] = true;
+                    loaded++;
+                    var pct = Math.round(loaded / coords.length * 100);
+                    progressBar.style.width = Math.min(pct, 100) + '%';
+                    progressText.textContent = '正在下载 ' + loaded + ' / ' + coords.length + ' 瓦片…';
+                    progressDetail.textContent = failed > 0 ? '失败: ' + failed + ' 张' : '';
+                }
+
+                function downloadOne(coord, retryCount) {
+                    var folder = 'tiles/' + coord.z + '/' + coord.x + '/';
+                    var filename = coord.y + '.png';
+                    var url = urlTemplate
+                        .replace('{s}', ['a', 'b', 'c', 'd'][Math.floor(Math.random() * 4)])
+                        .replace('{x}', String(coord.x))
+                        .replace('{y}', String(coord.y))
+                        .replace('{z}', String(coord.z));
+
+                    return fetchWithTimeout(url, { timeout: 15000 })
+                        .then(function(r) {
+                            if (!r.ok) throw new Error('HTTP ' + r.status);
+                            return r.blob();
+                        })
+                        .then(function(blob) {
+                            if (blob && blob.size > 100) {
+                                zip.file(folder + filename, blob);
+                            } else {
+                                throw new Error('空瓦片');
+                            }
+                        })
+                        .catch(function(err) {
+                            if (retryCount < maxRetries) {
+                                // 加入重试队列，延迟后重试
+                                return new Promise(function(resolve) {
+                                    setTimeout(function() {
+                                        downloadOne(coord, retryCount + 1).then(resolve).catch(resolve);
+                                    }, 500 * (retryCount + 1));
+                                });
+                            }
+                            // 重试耗尽，标记失败
+                            failed++;
+                        })
+                        .then(function() {
+                            markProgress(coord);
+                        });
+                }
+
+                // 并发池：同时运行 concurrency 个下载任务
+                var idx = 0;
+                function runPool() {
+                    var workers = [];
+                    for (var w = 0; w < concurrency; w++) {
+                        workers.push((function() {
+                            function next() {
+                                if (idx >= coords.length) return Promise.resolve();
+                                var i = idx++;
+                                return downloadOne(coords[i], 0).then(next);
+                            }
+                            return next();
+                        })());
+                    }
+                    return Promise.all(workers);
+                }
+
+                runPool().then(function() {
+                    // 写入元数据
+                    var sw = drawnBounds.getSouthWest();
+                    var ne = drawnBounds.getNorthEast();
+                    zip.file('metadata.json', JSON.stringify({
+                        region: selectedRegion ? selectedRegion.name : '',
+                        layer: layerName,
+                        bounds: { south: sw.lat, west: sw.lng, north: ne.lat, east: ne.lng },
+                        zoomMin: minZ,
+                        zoomMax: maxZ,
+                        totalTiles: coords.length - failed,
+                        failedTiles: failed,
+                        createdAt: new Date().toISOString()
+                    }, null, 2));
+
+                    progressText.textContent = '正在打包 ZIP…';
+                    progressBar.style.width = '100%';
+                    zip.generateAsync({ type: 'blob' }).then(function(content) {
+                        var blobUrl = URL.createObjectURL(content);
+                        var regionName = selectedRegion ? selectedRegion.name.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_') : 'tiles';
+                        var a = document.createElement('a');
+                        a.href = blobUrl;
+                        a.download = 'map_' + regionName + '_' + minZ + '-' + maxZ + '.zip';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 10000);
+                        toast('瓦片下载完成！成功 ' + (coords.length - failed) + ' 张' + (failed > 0 ? '，失败 ' + failed + ' 张' : ''));
+                        closeTilePanel();
+                    }).catch(function(err) {
+                        toast('打包失败: ' + err.message);
+                        body.style.display = 'block';
+                        footer.style.display = 'flex';
+                        progressWrap.classList.remove('show');
+                    });
+                });
+            });
+
+            // ==== 离线瓦片导入 ====
+            btnImport.addEventListener('click', function() {
+                importFile.click();
+            });
+
+            importFile.addEventListener('change', function() {
+                var file = this.files[0];
+                if (!file) return;
+                toast('正在导入离线瓦片…');
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    JSZip.loadAsync(e.target.result).then(function(zip) {
+                        var tileCount = 0;
+                        var metadata = null;
+                        var promises = [];
+
+                        if (zip.file('metadata.json')) {
+                            promises.push(
+                                zip.file('metadata.json').async('string').then(function(text) {
+                                    try { metadata = JSON.parse(text); } catch(ex) {}
+                                })
+                            );
+                        }
+
+                        Object.keys(offlineTileCache).forEach(function(k) {
+                            URL.revokeObjectURL(offlineTileCache[k]);
+                        });
+                        offlineTileCache = {};
+
+                        zip.forEach(function(path, entry) {
+                            if (entry.dir) return;
+                            if (path === 'metadata.json') return;
+                            var match = path.match(/tiles\/(\d+)\/(\d+)\/(\d+)\.\w+/);
+                            if (!match) return;
+                            var z = match[1], x = match[2], y = match[3];
+                            tileCount++;
+                            promises.push(
+                                entry.async('blob').then(function(blob) {
+                                    var key = z + '/' + x + '/' + y;
+                                    offlineTileCache[key] = URL.createObjectURL(blob);
+                                })
+                            );
+                        });
+
+                        Promise.all(promises).then(function() {
+                            toast('导入完成！共 ' + tileCount + ' 张瓦片');
+                            updateOfflineStatus();
+                            addOfflineLayer();
+                            // 如果有元数据，飞到对应区域
+                            if (metadata && metadata.bounds) {
+                                var b = metadata.bounds;
+                                map.fitBounds([[b.south, b.west], [b.north, b.east]], { padding: [40, 40] });
+                            }
+                        });
+                    }).catch(function(err) {
+                        toast('导入失败: ' + err.message);
+                    });
+                };
+                reader.readAsArrayBuffer(file);
+                this.value = '';
+            });
+
+            function updateOfflineStatus() {
+                var count = Object.keys(offlineTileCache).length;
+                if (count > 0) {
+                    offlineStatus.innerHTML = '<span class="offline-badge">已缓存 ' + count + ' 张</span>';
+                } else {
+                    offlineStatus.innerHTML = '<span style="color:#80868b;font-size:12px">未导入</span>';
+                }
+            }
+
+            function addOfflineLayer() {
+                if (offlineLayer) { map.removeLayer(offlineLayer); }
+                offlineLayer = L.tileLayer('', {
+                    maxZoom: 20,
+                    createTile: function(coords, done) {
+                        var key = coords.z + '/' + coords.x + '/' + coords.y;
+                        var tile = document.createElement('img');
+                        if (offlineTileCache[key]) {
+                            tile.src = offlineTileCache[key];
+                            setTimeout(function() { done(null, tile); }, 0);
+                        } else {
+                            tile.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                            setTimeout(function() { done(null, tile); }, 0);
+                        }
+                        return tile;
+                    }
+                });
+                if (!layers.offline) {
+                    layers.offline = offlineLayer;
+                    layerNames.offline = '离线';
+                }
+                var lp = document.getElementById('layer-panel');
+                if (lp && !lp.querySelector('[data-layer="offline"]')) {
+                    var div = document.createElement('div');
+                    div.className = 'layer-tile';
+                    div.dataset.layer = 'offline';
+                    div.innerHTML = '<div class="layer-tile-visual" style="background:#f5f5f5;display:flex;align-items:center;justify-content:center;font-size:11px;color:#5f6368">离线</div><div class="layer-tile-name">离线地图</div>';
+                    lp.querySelector('.layer-grid').appendChild(div);
+                    div.addEventListener('click', function() {
+                        map.removeLayer(curLayer);
+                        curLayerName = 'offline';
+                        curLayer = layers.offline.addTo(map);
+                        settings.defaultLayer = 'offline';
+                        saveSettings();
+                        document.querySelectorAll('.layer-tile').forEach(function(t) { t.classList.remove('active'); });
+                        div.classList.add('active');
+                        lp.classList.remove('show');
+                        toast('已切换到离线地图');
+                    });
+                }
+            }
+
+            window.openTileDownloadPanel = openTileDownloadPanel;
+        })();
+
+        function openTileDownloadPanel() {
+            if (window.openTileDownloadPanel) window.openTileDownloadPanel();
+        }
+
+        // ==== 快捷键 ====
+        document.addEventListener('keydown', function(e) {
+            if (e.target.tagName === 'INPUT') return;
+            if (e.key === '+' || e.key === '=') map.zoomIn();
+            else if (e.key === '-') map.zoomOut();
+            else if (e.key === 'Escape') {
+                closePanel();
+                document.getElementById('bottom-sheet').classList.remove('show');
+                routePanel.style.display = 'none';
+                resultsArea.style.display = 'none';
+            } else if (e.key === '/' || e.key === 'f') {
+                e.preventDefault();
+                searchInput.focus();
+            }
+        });
+
+        // 单位徽章初始
+        document.getElementById('unit-badge').textContent = settings.unit === 'km' ? '公里' : '英里';
+        // 初始图层选中状态
+        document.querySelectorAll('.layer-tile').forEach(function(t) {
+            t.classList.toggle('active', t.dataset.layer === curLayerName);
+        });
+        updatePlacesCount();
+    })();
+    </script>
+</body>
+</html>
