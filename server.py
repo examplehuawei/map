@@ -11,19 +11,16 @@ import time
 import tempfile
 import threading
 import mimetypes
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs, urlencode
+from urllib.parse import urlparse, parse_qs, quote
 
-# 尝试导入 urllib3/requests 用于 HTTP 代理
-try:
-    import urllib.request
-    import urllib.error
-    HAS_URLLIB = True
-except ImportError:
-    HAS_URLLIB = False
+import urllib.request
+import urllib.error
 
 # 静态文件目录
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
+USER_AGENT = 'OfflineMapApp/1.0 (educational project)'
 
 # ========== 语音识别（延迟加载） ==========
 _model_lock = threading.Lock()
@@ -51,22 +48,18 @@ def transcribe(audio_path, language='zh'):
 
 
 # ========== HTTP 代理工具 ==========
-def proxy_get(url, timeout=15, user_agent='OfflineMapApp/1.0 (educational project)'):
+def proxy_get(url, timeout=15, user_agent=USER_AGENT):
     """GET 请求代理，返回 (status_code, headers_dict, body_bytes)"""
-    req = urllib.request.Request(url, headers={
-        'User-Agent': user_agent
-    })
+    req = urllib.request.Request(url, headers={'User-Agent': user_agent})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read()
-            headers = dict(resp.headers)
-            return resp.status, headers, body
+            return resp.status, dict(resp.headers), resp.read()
     except urllib.error.HTTPError as e:
         return e.code, {}, e.read() if e.fp else b''
     except Exception as e:
         return 502, {}, str(e).encode('utf-8')
 
-def proxy_post(url, data, content_type='application/x-www-form-urlencoded', timeout=15, user_agent='OfflineMapApp/1.0 (educational project)'):
+def proxy_post(url, data, content_type='application/x-www-form-urlencoded', timeout=15, user_agent=USER_AGENT):
     """POST 请求代理"""
     if isinstance(data, str):
         data = data.encode('utf-8')
@@ -76,9 +69,7 @@ def proxy_post(url, data, content_type='application/x-www-form-urlencoded', time
     })
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read()
-            headers = dict(resp.headers)
-            return resp.status, headers, body
+            return resp.status, dict(resp.headers), resp.read()
     except urllib.error.HTTPError as e:
         return e.code, {}, e.read() if e.fp else b''
     except Exception as e:
@@ -153,87 +144,42 @@ class Handler(BaseHTTPRequestHandler):
 
         # 检测是否为中文查询（包含中文字符）
         is_chinese = any('\u4e00' <= c <= '\u9fff' for c in q)
-        
+
+        # 搜索提供方：(name, url_builder, transformer, result_getter)
+        # 中文顺序：Nominatim → Open-Meteo → Photon
+        # 英文顺序：Photon → Nominatim → Open-Meteo
+        providers = [
+            ('nominatim',
+             lambda: f'https://nominatim.openstreetmap.org/search?format=json&q={quote(q)}&limit={limit}&accept-language=zh&addressdetails=1',
+             self._transform_nominatim,
+             lambda d: d),
+            ('open-meteo',
+             lambda: f'https://geocoding-api.open-meteo.com/v1/search?name={quote(q)}&count={limit}&language=zh&format=json',
+             self._transform_open_meteo,
+             lambda d: d.get('results')),
+            ('photon',
+             lambda: f'https://photon.komoot.io/api/?q={quote(q)}&limit={limit}',
+             self._transform_photon,
+             lambda d: d.get('features')),
+        ]
+        if not is_chinese:
+            # 英文查询：Photon 优先
+            providers = [providers[2], providers[0], providers[1]]
+
         results = None
-
-        # 中文查询：优先 Nominatim → Open-Meteo → Photon
-        # 英文查询：优先 Photon → Nominatim → Open-Meteo
-        if is_chinese:
-            # 1) Nominatim (对中文支持好)
+        for name, url_builder, transform, get_result in providers:
             try:
-                url = f'https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(q)}&limit={limit}&accept-language=zh&addressdetails=1'
-                status, _, body = proxy_get(url, timeout=10)
+                status, _, body = proxy_get(url_builder(), timeout=10)
                 if status == 200:
                     data = json.loads(body)
-                    if data:
-                        results = self._transform_nominatim(data)
+                    raw = get_result(data)
+                    if raw:
+                        results = transform(data)
+                        break
             except Exception as e:
-                print(f'[search] nominatim error: {e}', flush=True)
+                print(f'[search] {name} error: {e}', flush=True)
 
-            # 2) Open-Meteo
-            if results is None:
-                try:
-                    url = f'https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(q)}&count={limit}&language=zh&format=json'
-                    status, _, body = proxy_get(url, timeout=10)
-                    if status == 200:
-                        data = json.loads(body)
-                        if data.get('results'):
-                            results = self._transform_open_meteo(data)
-                except Exception as e:
-                    print(f'[search] open-meteo error: {e}', flush=True)
-
-            # 3) Photon (降级)
-            if results is None:
-                try:
-                    url = f'https://photon.komoot.io/api/?q={urllib.parse.quote(q)}&limit={limit}'
-                    status, _, body = proxy_get(url, timeout=10)
-                    if status == 200:
-                        data = json.loads(body)
-                        if data.get('features'):
-                            results = self._transform_photon(data)
-                except Exception as e:
-                    print(f'[search] photon error: {e}', flush=True)
-        else:
-            # 英文查询：优先 Photon
-            # 1) Photon
-            try:
-                url = f'https://photon.komoot.io/api/?q={urllib.parse.quote(q)}&limit={limit}'
-                status, _, body = proxy_get(url, timeout=10)
-                if status == 200:
-                    data = json.loads(body)
-                    if data.get('features'):
-                        results = self._transform_photon(data)
-            except Exception as e:
-                print(f'[search] photon error: {e}', flush=True)
-
-            # 2) Nominatim
-            if results is None:
-                try:
-                    url = f'https://nominatim.openstreetmap.org/search?format=json&q={urllib.parse.quote(q)}&limit={limit}&accept-language=zh&addressdetails=1'
-                    status, _, body = proxy_get(url, timeout=10)
-                    if status == 200:
-                        data = json.loads(body)
-                        if data:
-                            results = self._transform_nominatim(data)
-                except Exception as e:
-                    print(f'[search] nominatim error: {e}', flush=True)
-
-            # 3) Open-Meteo
-            if results is None:
-                try:
-                    url = f'https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(q)}&count={limit}&language=zh&format=json'
-                    status, _, body = proxy_get(url, timeout=10)
-                    if status == 200:
-                        data = json.loads(body)
-                        if data.get('results'):
-                            results = self._transform_open_meteo(data)
-                except Exception as e:
-                    print(f'[search] open-meteo error: {e}', flush=True)
-
-        if results is None:
-            results = []
-
-        self._json({'results': results})
+        self._json({'results': results or []})
 
     def _transform_photon(self, data):
         out = []
@@ -315,7 +261,7 @@ class Handler(BaseHTTPRequestHandler):
         url1 = (
             f'https://commons.wikimedia.org/w/api.php?'
             f'action=query&list=geosearch&gsprimary=all&gsnamespace=6&gslimit=40'
-            f'&gsradius={radius}&gscoord={urllib.parse.quote(lat)}|{urllib.parse.quote(lon)}'
+            f'&gsradius={radius}&gscoord={quote(lat)}|{quote(lon)}'
             f'&format=json&origin=*'
         )
         status1, _, body1 = proxy_get(url1, timeout=15)
@@ -333,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
         pageids = '|'.join(str(x['pageid']) for x in geo_results)
         url2 = (
             f'https://commons.wikimedia.org/w/api.php?'
-            f'action=query&pageids={urllib.parse.quote(pageids)}'
+            f'action=query&pageids={quote(pageids)}'
             f'&prop=imageinfo&iiprop=url|thumburl|dimensions|mime'
             f'&iiurlwidth=800&format=json&origin=*'
         )
@@ -393,7 +339,7 @@ class Handler(BaseHTTPRequestHandler):
     def _do_overpass(self, query):
         status, _, body = proxy_post(
             'https://overpass-api.de/api/interpreter',
-            'data=' + urllib.parse.quote(query),
+            'data=' + quote(query),
             content_type='application/x-www-form-urlencoded',
             timeout=15
         )
@@ -412,26 +358,30 @@ class Handler(BaseHTTPRequestHandler):
             raw = self.rfile.read(content_length)
 
             suffix = '.webm'
-            if 'ogg' in content_type: suffix = '.ogg'
-            elif 'wav' in content_type: suffix = '.wav'
-            elif 'mp4' in content_type or 'm4a' in content_type: suffix = '.m4a'
+            if 'ogg' in content_type:
+                suffix = '.ogg'
+            elif 'wav' in content_type:
+                suffix = '.wav'
+            elif 'mp4' in content_type or 'm4a' in content_type:
+                suffix = '.m4a'
 
             tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
-            with os.fdopen(tmp_fd, 'wb') as f:
-                f.write(raw)
-            print(f'[asr] 收到 {len(raw)} 字节音频', flush=True)
-
             try:
+                with os.fdopen(tmp_fd, 'wb') as f:
+                    f.write(raw)
+                print(f'[asr] 收到 {len(raw)} 字节音频', flush=True)
+
                 t0 = time.time()
                 text = transcribe(tmp_path, language='zh')
                 dt = time.time() - t0
                 print(f'[asr] 识别完成: {text!r}  耗时 {dt:.2f}s', flush=True)
                 self._json({'text': text, 'time': round(dt, 2)})
             finally:
-                try: os.unlink(tmp_path)
-                except: pass
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
         except Exception as e:
-            import traceback
             traceback.print_exc()
             self._json({'error': str(e)}, 500)
 
@@ -461,47 +411,43 @@ class Handler(BaseHTTPRequestHandler):
             results = {}  # key -> (success, data)
             lock = threading.Lock()
             download_count = [0]  # mutable counter
+            total = len(tiles)
+
+            def record_success(key, img_data):
+                with lock:
+                    results[key] = (True, img_data)
+                    download_count[0] += 1
+                    if download_count[0] % 50 == 0:
+                        print(f'[tiles] 已下载 {download_count[0]}/{total}', flush=True)
+
+            def fetch_tile(url):
+                req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    if resp.status != 200:
+                        return None
+                    img_data = resp.read()
+                    return img_data if len(img_data) > 100 else None
 
             def download_one(tile):
                 x, y, z = tile['x'], tile['y'], tile['z']
-                sub = subdomains[hash(f'{z}/{x}/{y}') % len(subdomains)]
-                url = url_template.replace('{s}', sub).replace('{x}', str(x)).replace('{y}', str(y)).replace('{z}', str(z))
                 key = f'{z}/{x}/{y}'
+                base_hash = hash(key)
 
-                try:
-                    req = urllib.request.Request(url, headers={
-                        'User-Agent': 'OfflineMapApp/1.0 (educational project)'
-                    })
-                    with urllib.request.urlopen(req, timeout=20) as resp:
-                        if resp.status == 200:
-                            img_data = resp.read()
-                            if len(img_data) > 100:
-                                with lock:
-                                    results[key] = (True, img_data)
-                                    download_count[0] += 1
-                                    if download_count[0] % 50 == 0:
-                                        print(f'[tiles] 已下载 {download_count[0]}/{len(tiles)}', flush=True)
-                                return
-                except Exception as e:
-                    pass
-
-                # 失败：重试一次
-                try:
-                    sub2 = subdomains[(hash(f'{z}/{x}/{y}') + 1) % len(subdomains)]
-                    url2 = url_template.replace('{s}', sub2).replace('{x}', str(x)).replace('{y}', str(y)).replace('{z}', str(z))
-                    req = urllib.request.Request(url2, headers={
-                        'User-Agent': 'OfflineMapApp/1.0 (educational project)'
-                    })
-                    with urllib.request.urlopen(req, timeout=20) as resp:
-                        if resp.status == 200:
-                            img_data = resp.read()
-                            if len(img_data) > 100:
-                                with lock:
-                                    results[key] = (True, img_data)
-                                    download_count[0] += 1
-                                return
-                except Exception:
-                    pass
+                # 最多尝试 len(subdomains) 个不同子域名
+                for attempt in range(len(subdomains)):
+                    sub = subdomains[(base_hash + attempt) % len(subdomains)]
+                    url = (url_template
+                           .replace('{s}', sub)
+                           .replace('{x}', str(x))
+                           .replace('{y}', str(y))
+                           .replace('{z}', str(z)))
+                    try:
+                        img_data = fetch_tile(url)
+                        if img_data is not None:
+                            record_success(key, img_data)
+                            return
+                    except Exception:
+                        pass
 
                 with lock:
                     results[key] = (False, None)
@@ -543,7 +489,6 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(zip_data)
 
         except Exception as e:
-            import traceback
             traceback.print_exc()
             self._json({'error': str(e)}, 500)
 
@@ -553,13 +498,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/' or path == '':
             path = '/index.html'
 
-        # 安全检查
-        path = os.path.normpath(path)
-        if '..' in path:
-            return self._json({'error': 'forbidden'}, 403)
-
-        file_path = os.path.join(STATIC_DIR, path.lstrip('/'))
-        if not os.path.isfile(file_path):
+        # 安全检查：解析真实路径，确保仍在 STATIC_DIR 内
+        file_path = os.path.realpath(os.path.join(STATIC_DIR, path.lstrip('/')))
+        if not file_path.startswith(STATIC_DIR + os.sep) or not os.path.isfile(file_path):
             return self._json({'error': 'not found'}, 404)
 
         content_type, _ = mimetypes.guess_type(file_path)
